@@ -242,6 +242,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
             }
             return p
           }))
+          localStorage.setItem('api_config_status', JSON.stringify({ provider: 'jimeng', configuredAt: Date.now() }))
         }
       }).catch(() => {})
       fetch('/api/openai/status').then(r => r.json()).then(d => {

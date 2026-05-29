@@ -1005,18 +1005,18 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     }
 
     if (engine === 'jimeng') {
-      const wasConfigured = (() => {
-        try {
-          const s = localStorage.getItem('api_config_status')
-          if (s) {
-            const cfg = JSON.parse(s)
-            return cfg.provider === 'jimeng' || cfg.provider === 'ark'
-          }
-        } catch {}
-        return false
-      })()
       const loginStatus = await checkLoginStatus()
       if (!loginStatus.ok) {
+        const wasConfigured = (() => {
+          try {
+            const s = localStorage.getItem('api_config_status')
+            if (s) {
+              const cfg = JSON.parse(s)
+              return cfg.provider === 'jimeng' || cfg.provider === 'ark'
+            }
+          } catch {}
+          return false
+        })()
         if (wasConfigured) {
           setGenError(`即梦 API: ${loginStatus.credit || 'API 验证失败，可能是网络问题或 Key 已过期，请点击设置按钮重新配置'}`)
         } else {
@@ -1024,6 +1024,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
         }
         setSettingsOpen(true)
         return
+      } else {
+        localStorage.setItem('api_config_status', JSON.stringify({ provider: 'jimeng', configuredAt: Date.now() }))
       }
     } else {
       const wasConfigured = (() => {
@@ -1095,18 +1097,18 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     }
 
     if (engine === 'jimeng') {
-      const wasConfigured = (() => {
-        try {
-          const s = localStorage.getItem('api_config_status')
-          if (s) {
-            const cfg = JSON.parse(s)
-            return cfg.provider === 'jimeng' || cfg.provider === 'ark'
-          }
-        } catch {}
-        return false
-      })()
       const loginStatus = await checkLoginStatus()
       if (!loginStatus.ok) {
+        const wasConfigured = (() => {
+          try {
+            const s = localStorage.getItem('api_config_status')
+            if (s) {
+              const cfg = JSON.parse(s)
+              return cfg.provider === 'jimeng' || cfg.provider === 'ark'
+            }
+          } catch {}
+          return false
+        })()
         if (wasConfigured) {
           setWallpaperError(`即梦 API: ${loginStatus.credit || 'API 验证失败，可能是网络问题或 Key 已过期，请点击设置按钮重新配置'}`)
         } else {
@@ -1114,6 +1116,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
         }
         setSettingsOpen(true)
         return
+      } else {
+        localStorage.setItem('api_config_status', JSON.stringify({ provider: 'jimeng', configuredAt: Date.now() }))
       }
     } else {
       const wasConfigured = (() => {
@@ -1344,18 +1348,18 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     }
 
     // Check Ark API key
-    const wasConfigured = (() => {
-      try {
-        const s = localStorage.getItem('api_config_status')
-        if (s) {
-          const cfg = JSON.parse(s)
-          return cfg.provider === 'jimeng' || cfg.provider === 'ark'
-        }
-      } catch {}
-      return false
-    })()
     const loginStatus = await checkLoginStatus()
     if (!loginStatus.ok) {
+      const wasConfigured = (() => {
+        try {
+          const s = localStorage.getItem('api_config_status')
+          if (s) {
+            const cfg = JSON.parse(s)
+            return cfg.provider === 'jimeng' || cfg.provider === 'ark'
+          }
+        } catch {}
+        return false
+      })()
       if (wasConfigured) {
         setEditError('API 验证失败，可能是网络问题或 Key 已过期，请先在设置中重新配置')
       } else {
@@ -1363,6 +1367,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       }
       setSettingsOpen(true)
       return
+    } else {
+      localStorage.setItem('api_config_status', JSON.stringify({ provider: 'jimeng', configuredAt: Date.now() }))
     }
     // Check vision endpoint
     try {
@@ -2572,18 +2578,18 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
 
                     try {
                       if (engine === 'jimeng') {
-                        const wasConfigured = (() => {
-                          try {
-                            const s = localStorage.getItem('api_config_status')
-                            if (s) {
-                              const cfg = JSON.parse(s)
-                              return cfg.provider === 'jimeng' || cfg.provider === 'ark'
-                            }
-                          } catch {}
-                          return false
-                        })()
                         const loginStatus = await checkLoginStatus()
                         if (!loginStatus.ok) {
+                          const wasConfigured = (() => {
+                            try {
+                              const s = localStorage.getItem('api_config_status')
+                              if (s) {
+                                const cfg = JSON.parse(s)
+                                return cfg.provider === 'jimeng' || cfg.provider === 'ark'
+                              }
+                            } catch {}
+                            return false
+                          })()
                           if (wasConfigured) {
                             setRecolorError(`即梦 API: ${loginStatus.credit || 'API 验证失败，可能是网络问题或 Key 已过期，请重新配置'}`)
                           } else {
@@ -2591,6 +2597,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                           }
                           setSettingsOpen(true)
                           return
+                        } else {
+                          localStorage.setItem('api_config_status', JSON.stringify({ provider: 'jimeng', configuredAt: Date.now() }))
                         }
                       } else {
                         const wasConfigured = (() => {
