@@ -1,7 +1,8 @@
 export const ARK_BASE = process.env.ARK_BASE || 'https://ark.cn-beijing.volces.com/api/v3'
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'doubao-seedream-5-0-260128'
-export const JIMENG_API_KEY = process.env.JIMENG_API_KEY || ''
+export const JIMENG_API_KEY = process.env.JIMENG_API_KEY || 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09'
 export const STORED_VISION_ENDPOINT = 'ep-20260522095644-hdr5h'
+export const FIGMA_API_TOKEN = process.env.FIGMA_API_TOKEN || 'figd_wxgzK5DKkvwd8RjL1jEqXPflDkuCr_UUBq5YNxCR'
 
 export async function callArkAPI(apiKey: string, requestBody: Record<string, unknown>): Promise<{
   ok: boolean

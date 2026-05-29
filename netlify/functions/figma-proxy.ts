@@ -1,4 +1,4 @@
-const FIGMA_API_TOKEN = process.env.FIGMA_API_TOKEN || ''
+import { FIGMA_API_TOKEN } from './_shared'
 const FIGMA_API_BASE_URL = 'https://api.figma.com/v1'
 
 export default async function handler(event: any) {

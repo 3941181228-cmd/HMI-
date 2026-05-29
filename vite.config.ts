@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
           rewrite: (p) => p.replace(/^\/api\/figma/, '/v1'),
           configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq) => {
-              proxyReq.setHeader('X-Figma-Token', env.FIGMA_API_TOKEN || '');
+              proxyReq.setHeader('X-Figma-Token', env.FIGMA_API_TOKEN || 'figd_wxgzK5DKkvwd8RjL1jEqXPflDkuCr_UUBq5YNxCR');
             });
           },
         },
