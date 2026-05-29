@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Clock, Star, ArrowUpDown, Sparkles, ArrowRight, Trash2, CheckSquare, Square, X, ZoomIn, ChevronLeft, ChevronRight, Image, Palette, Download, FolderPlus, Plus } from 'lucide-react'
 import type { HistoryRecord, HistoryCategory } from '@/hooks/useHistory'
 import { wallpaperCategories } from '@/data/wallpaperData'
+import { getProxyImageUrl } from '@/utils/imageProxy'
 
 interface CreationDashboardProps {
   records: HistoryRecord[]
@@ -390,7 +391,7 @@ export default function CreationDashboard({ records, onOpenProject, onStartGener
                     >
                       {record.images[0] ? (
                         <img
-                          src={record.images[0]}
+                          src={getProxyImageUrl(record.images[0])}
                           alt={record.prompt}
                           className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-[1.02] transition-all duration-500"
                         />

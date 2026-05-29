@@ -38,6 +38,7 @@ import { Button } from './ui/button'
 import CheckBadge, { checkItemsByCategory } from './CheckBadge'
 import { generateWithPoll, checkLoginStatus } from '@/services/jimeng'
 import { themes, getThemeById } from '@/data/themeData'
+import { getProxyImageUrl } from '@/utils/imageProxy'
 import type { HMITheme } from '@/data/themeData'
 import { animeWallpapers, animeTags, natureWallpapers, natureTags, abstractWallpapers, abstractTags, cityWallpapers, cityTags, vehicleWallpapers, vehicleTags, animalWallpapers, animalTags, wallpaperCategories } from '@/data/wallpaperData'
 
@@ -1852,7 +1853,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                       >
                         {record.images[0] && (
                           <img
-                            src={record.images[0]}
+                            src={getProxyImageUrl(record.images[0])}
                             alt={record.prompt}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           />
@@ -3454,7 +3455,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                       >
                         {record.images[0] && (
                           <img
-                            src={record.images[0]}
+                            src={getProxyImageUrl(record.images[0])}
                             alt={record.prompt}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           />

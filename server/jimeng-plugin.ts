@@ -255,6 +255,31 @@ export function jimengServerPlugin(): Plugin {
         }
       })
 
+      // Proxy image display: fetch external image and serve for inline display
+      server.middlewares.use('/api/jimeng/proxy_image', async (req, res) => {
+        const url = new URL(req.url || '', 'http://localhost')
+        const imageUrl = url.searchParams.get('url')
+        if (!imageUrl) {
+          json(res, 400, { error: 'url is required' })
+          return
+        }
+        try {
+          const resp = await fetch(imageUrl)
+          if (!resp.ok) {
+            json(res, 502, { error: `Upstream ${resp.status}` })
+            return
+          }
+          const contentType = resp.headers.get('content-type') || 'image/jpeg'
+          const buffer = await resp.arrayBuffer()
+          res.statusCode = 200
+          res.setHeader('Content-Type', contentType)
+          res.setHeader('Cache-Control', 'max-age=3600')
+          res.end(Buffer.from(buffer))
+        } catch (err) {
+          json(res, 500, { error: String(err) })
+        }
+      })
+
       // ── OpenAI GPT-image-1 ────────────────────────────────────────────
 
       // Save OpenAI API key
