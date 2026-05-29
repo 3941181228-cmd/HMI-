@@ -1,0 +1,11 @@
+{
+  "name": "theme-swap-workflow",
+  "version": "1.0.0",
+  "description": "Figma Theme Color Swapper — Web 控制台 + 桥接服务",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

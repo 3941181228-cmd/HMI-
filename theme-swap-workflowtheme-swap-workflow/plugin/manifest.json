@@ -1,0 +1,12 @@
+{
+  "name": "Theme Color Swapper",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["http://localhost:8766"],
+    "reasoning": "与本地桥接服务器通信，实现颜色替换自动化"
+  }
+}

@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theme Color Swapper</title>
+<style>
+  :root {
+    --primary: #7C5CFC;
+    --primary-hover: #6848E8;
+    --primary-light: rgba(124, 92, 252, 0.1);
+    --primary-glow: rgba(124, 92, 252, 0.3);
+    --bg: #ffffff;
+    --bg-secondary: #f6f7fb;
+    --border: #e8eaf0;
+    --text: #2c2e3a;
+    --text-secondary: #7c7e8c;
+    --text-tertiary: #b0b2be;
+    --success: #1a8a3f;
+    --success-light: #edf7f0;
+    --warning: #e68a00;
+    --warning-light: #fff8e6;
+    --danger: #e74c3c;
+    --danger-hover: #c0392b;
+    --radius: 8px;
+    --font: Inter, system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg);
+    overflow-x: hidden;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    position: relative;
+    padding: 20px 20px 18px;
+    background: #0a0a0f;
+    overflow: hidden;
+  }
+
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -40%;
+    left: -10%;
+    width: 70%;
+    height: 180%;
+    background: radial-gradient(circle at 30% 40%, rgba(124, 92, 252, 0.4) 0%, rgba(80, 50, 220, 0.15) 35%, transparent 65%);
+    pointer-events: none;
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: -30%;
+    right: -5%;
+    width: 50%;
+    height: 140%;
+    background: radial-gradient(circle at 70% 60%, rgba(100, 70, 255, 0.2) 0%, rgba(50, 30, 180, 0.08) 40%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .header-content {
+    position: relative;
+    z-index: 1;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .header-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, #7C5CFC, #5A3FD4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 10px rgba(124, 92, 252, 0.35);
+  }
+
+  .header-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .header h1 {
+    font-size: 17px;
+    font-weight: 700;
+    background: linear-gradient(to right, #ffffff, #b8a8ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: 0.3px;
+    line-height: 1.3;
+  }
+
+  .header .tagline {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 0;
+    letter-spacing: 0.2px;
+  }
+
+  /* ─── Body ─── */
+  .body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 16px 0;
+    overflow: hidden;
+  }
+
+  .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-right: 4px;
+  }
+
+  .scroll-area::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scroll-area::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-area::-webkit-scrollbar-thumb {
+    background: #ddd;
+    border-radius: 2px;
+  }
+  .scroll-area::-webkit-scrollbar-thumb:hover {
+    background: #ccc;
+  }
+
+  #main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  #main-content:has(.selection-hint) {
+    justify-content: center;
+  }
+
+  /* ─── Buttons ─── */
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0;
+    flex-shrink: 0;
+  }
+
+  .actions .btn {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+    padding: 9px 14px;
+  }
+
+  .btn {
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 500;
+    font-family: var(--font);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .btn:hover {
+    background: var(--bg-secondary);
+    border-color: #d0d3de;
+  }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-primary {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+    box-shadow: 0 1px 4px rgba(124, 92, 252, 0.25);
+  }
+  .btn-primary:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+    box-shadow: 0 2px 8px rgba(124, 92, 252, 0.35);
+  }
+  .btn-primary:disabled {
+    background: #c4baf0;
+    border-color: #c4baf0;
+    box-shadow: none;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-import {
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: rgba(124, 92, 252, 0.25);
+  }
+  .btn-import:hover {
+    background: rgba(124, 92, 252, 0.15);
+    border-color: rgba(124, 92, 252, 0.4);
+  }
+
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 10px;
+    border-radius: 6px;
+  }
+
+  /* ─── Selection hint ─── */
+  .selection-hint {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    margin: 4px 0;
+    border: 1px dashed #c8cbd6;
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 160px;
+    background: rgba(124, 92, 252, 0.06);
+  }
+
+  .selection-hint .hint-icon {
+    font-size: 32px;
+    margin-bottom: 14px;
+    opacity: 0.5;
+  }
+
+  .selection-hint p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  .selection-hint p strong {
+    color: var(--primary);
+    font-weight: 600;
+  }
+
+  /* ─── Import rule section ─── */
+  .import-section {
+    border: 1px dashed rgba(124, 92, 252, 0.3);
+    border-radius: 10px;
+    background: rgba(124, 92, 252, 0.06);
+    padding: 10px 12px 0 8px;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+  }
+
+  .import-rule-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .import-rule-info .rule-name {
+    font-weight: 500;
+    font-size: 11px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .import-rule-info .rule-count {
+    font-size: 10px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .direction-buttons {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .direction-btn {
+    flex: 1;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 11px;
+    font-family: var(--font);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+  .direction-btn:hover {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .direction-btn.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+
+  .import-stats {
+    margin: 8px -12px 0 -8px;
+    padding: 6px 12px 6px 8px;
+    border-radius: 0 0 10px 10px;
+    font-size: 10px;
+    text-align: center;
+    background: var(--success-light);
+    color: var(--success);
+  }
+
+  .import-stats.has-unmatched {
+    background: var(--warning-light);
+    color: var(--warning);
+  }
+
+  /* ─── Scan summary card ─── */
+  .scan-summary {
+    border: 1px dashed rgba(124, 92, 252, 0.3);
+    border-radius: 10px;
+    background: rgba(124, 92, 252, 0.06);
+    padding: 10px 12px 10px 8px;
+    margin-bottom: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .summary-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .summary-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .summary-left .icon {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text);
+    line-height: 0;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .badge-count {
+    background: rgba(124, 92, 252, 0.1);
+    color: var(--primary);
+    border: none;
+    border-radius: 6px;
+  }
+
+  .badge-mode {
+    background: var(--primary);
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 8px;
+    border: none;
+    font-weight: 600;
+  }
+
+  .summary-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .summary-right .toggle-label-inline {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .color-list-container {
+    padding: 8px 0 0;
+  }
+
+  .color-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .color-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    background: var(--bg);
+    transition: background 0.1s;
+  }
+  .color-item:hover { background: var(--bg-secondary); }
+  .color-item.unmatched {
+    border-color: var(--warning);
+    background: var(--warning-light);
+  }
+  .color-item.matched {
+    border-color: #c3e6cb;
+    background: #f0faf3;
+  }
+
+  .color-item-left {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .color-item-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-left: 16px;
+  }
+
+  .swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid #ddd;
+    flex-shrink: 0;
+  }
+
+  .source-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .source-hex {
+    font-weight: 600;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .source-meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+
+  .source-count {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    margin-left: 10px;
+    vertical-align: middle;
+  }
+
+  /* ─── Target picker ─── */
+  .target-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px dashed #ccc;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .target-swatch.mapped {
+    border-style: solid;
+    border-color: #999;
+  }
+
+  .target-input {
+    width: 66px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text);
+    background: var(--bg);
+  }
+  .target-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.15);
+  }
+
+  .clear-btn {
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .clear-btn:hover { color: var(--danger); background: #fef0f0; }
+
+  .arrow {
+    color: var(--text-tertiary);
+    font-size: 10px;
+    flex-shrink: 0;
+    margin: 0 20px 0 4px;
+  }
+
+  /* ─── Status bar ─── */
+  .status-bar {
+    padding: 6px 16px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-align: center;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+    line-height: 1.3;
+    margin-right: 0;
+  }
+  .status-bar.success { color: var(--success); }
+  .status-bar.error { color: var(--danger); }
+
+  .ws-status {
+    padding: 4px 16px;
+    font-size: 10px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    background: #fafafa;
+    flex-shrink: 0;
+    line-height: 1.3;
+    color: var(--text-secondary);
+  }
+
+  /* ─── Empty state ─── */
+  .empty-state {
+    text-align: center;
+    padding: 30px 16px;
+    color: var(--text-tertiary);
+  }
+
+  /* ─── Hidden elements ─── */
+  .hidden { display: none !important; }
+
+  /* ─── Toggle switch ─── */
+  .toggle-switch {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #ccc;
+    border-radius: 18px;
+    transition: 0.2s;
+  }
+
+  .toggle-slider:before {
+    content: '';
+    position: absolute;
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    top: 2px;
+    background: #fff;
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--primary);
+  }
+
+  .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(14px);
+  }
+
+  /* ─── Scrollbar ─── */
+  .color-list::-webkit-scrollbar {
+    width: 4px;
+  }
+  .color-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .color-list::-webkit-scrollbar-thumb {
+    background: #ddd;
+    border-radius: 4px;
+  }
+  .color-list::-webkit-scrollbar-thumb:hover {
+    background: #ccc;
+  }
+
+  /* ─── Mode badge ─── */
+  /* ─── Custom Color Picker ─── */
+  .cp-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .cp-panel {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    width: 300px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    position: relative;
+  }
+
+  .cp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .cp-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .cp-close {
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    border-radius: 4px;
+  }
+  .cp-close:hover { color: var(--text); background: var(--bg-secondary); }
+
+  /* Palette canvas */
+  .cp-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: crosshair;
+  }
+
+  .cp-canvas-wrap canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 8px;
+  }
+
+  .cp-crosshair {
+    position: absolute;
+    pointer-events: none;
+    font-size: 18px;
+    color: #fff;
+    text-shadow: 0 0 3px rgba(0,0,0,0.5), 0 0 3px rgba(0,0,0,0.5);
+    transform: translate(-50%, -50%);
+    line-height: 1;
+  }
+
+  /* Row: eyedropper + swatch + sliders */
+  .cp-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .cp-swatch-group {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .cp-eyedropper {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    padding: 0;
+  }
+  .cp-eyedropper:hover { background: var(--bg-secondary); }
+  .cp-eyedropper:active { background: var(--primary-light); color: var(--primary); }
+  .cp-eyedropper.active { background: var(--primary); color: #fff; box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.3); }
+
+  .cp-current-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .cp-sliders {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cp-slider-row {
+    position: relative;
+    height: 14px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+
+  .cp-slider-bg {
+    width: 100%;
+    height: 100%;
+    border-radius: 7px;
+    position: relative;
+  }
+
+  .cp-hue-bg {
+    background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  }
+
+  .cp-opacity-bg {
+    background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 0 / 8px 8px;
+  }
+
+  .cp-opacity-bg::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border-radius: 7px;
+    background: linear-gradient(to right, transparent, var(--cp-color));
+    pointer-events: none;
+  }
+
+  .cp-slider-thumb {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+
+  /* Values row */
+  .cp-values {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .cp-mode-select {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 10px;
+    font-family: var(--font);
+    color: var(--text);
+    background: var(--bg);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .cp-inputs {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+  }
+
+  .cp-input {
+    width: 100%;
+    padding: 4px 4px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    text-align: center;
+    color: var(--text);
+    background: var(--bg);
+    -moz-appearance: textfield;
+  }
+  .cp-input::-webkit-outer-spin-button,
+  .cp-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .cp-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(124,92,252,0.15); }
+
+  .cp-input.cp-r { color: #e74c3c; }
+  .cp-input.cp-g { color: #27ae60; }
+  .cp-input.cp-b { color: #2980b9; }
+  .cp-input.cp-a { color: var(--text); }
+
+  .cp-a-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  .cp-a-wrap .cp-input {
+    padding-right: 14px;
+  }
+
+  .cp-a-unit {
+    position: absolute;
+    right: 4px;
+    font-size: 9px;
+    color: var(--text-tertiary);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-content">
+    <div class="header-top">
+      <div class="header-logo">✦</div>
+      <div class="header-text">
+        <h1>Theme Color Swapper</h1>
+        <p class="tagline">智能识别并转换深色 / 浅色主题配色</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="body">
+
+  <div class="scroll-area">
+    <!-- Import rule section (hidden until rule loaded) -->
+    <div class="import-section hidden" id="import-section">
+      <div class="import-rule-info">
+        <span class="rule-name" id="rule-name"></span>
+        <span class="rule-count" id="rule-count"></span>
+        <button class="btn btn-sm" id="btn-clear-rule">清除</button>
+      </div>
+      <div class="direction-buttons">
+        <button class="direction-btn" id="dir-light-to-dark">浅色 → 深色</button>
+        <button class="direction-btn" id="dir-dark-to-light">深色 → 浅色</button>
+      </div>
+      <div class="import-stats hidden" id="import-stats"></div>
+    </div>
+
+    <div id="main-content">
+    <div class="selection-hint" id="hint">
+      <div class="hint-icon">🖼</div>
+      <p>在 Figma 中选择画板或分组，</p>
+      <p>点击 <strong>扫描</strong> 按钮识别颜色。</p>
+    </div>
+  </div>
+
+  </div><!-- /scroll-area -->
+
+  <div class="actions" id="actions-bar">
+    <button class="btn" id="btn-rescan">扫描</button>
+    <button class="btn btn-import" id="btn-import-rule">导入映射规则</button>
+    <button class="btn btn-primary" id="btn-apply" disabled>应用更改</button>
+  </div>
+
+  <div class="status-bar" id="status">就绪</div>
+  <div class="ws-status" id="wsStatus">🔴 未连接 WS</div>
+
+</div>
+
+<!-- Hidden file input for JSON import -->
+<input type="file" id="file-input" class="hidden" accept=".json,application/json" />
+<input type="color" id="color-picker" class="hidden" />
+
+<!-- Custom Color Picker Panel -->
+<div class="cp-overlay hidden" id="cp-overlay">
+  <div class="cp-panel" id="cp-panel">
+
+    <!-- Header -->
+    <div class="cp-header">
+      <span class="cp-title">取色器</span>
+      <button class="cp-close" id="cp-close">✕</button>
+    </div>
+
+    <!-- Color palette -->
+    <div class="cp-canvas-wrap">
+      <canvas id="cp-canvas" width="268" height="180"></canvas>
+      <div class="cp-crosshair" id="cp-crosshair">○</div>
+    </div>
+
+    <!-- Eyedropper + swatch + sliders -->
+    <div class="cp-row">
+      <div class="cp-swatch-group">
+        <button class="cp-eyedropper" id="cp-eyedropper" title="取色">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 6.5a3.5 3.5 0 0 0-5 0L4 15v5h5l8.5-8.5a3.5 3.5 0 0 0 0-5z"/><path d="M14 9l-7 7"/></svg>
+        </button>
+        <div class="cp-current-swatch" id="cp-current-swatch"></div>
+      </div>
+      <div class="cp-sliders">
+        <div class="cp-slider-row">
+          <div class="cp-slider-bg cp-hue-bg" id="cp-hue-bg">
+            <div class="cp-slider-thumb" id="cp-hue-thumb"></div>
+          </div>
+        </div>
+        <div class="cp-slider-row">
+          <div class="cp-slider-bg cp-opacity-bg" id="cp-opacity-bg">
+            <div class="cp-slider-thumb" id="cp-opacity-thumb"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RGB / HEX values -->
+    <div class="cp-values">
+      <select class="cp-mode-select" id="cp-mode">
+        <option value="rgb">RGB</option>
+        <option value="hex">HEX</option>
+        <option value="hsl">HSL</option>
+      </select>
+      <div class="cp-inputs" id="cp-inputs">
+        <input type="number" class="cp-input cp-r" id="cp-r" min="0" max="255" placeholder="R" />
+        <input type="number" class="cp-input cp-g" id="cp-g" min="0" max="255" placeholder="G" />
+        <input type="number" class="cp-input cp-b" id="cp-b" min="0" max="255" placeholder="B" />
+        <span class="cp-a-wrap">
+          <input type="number" class="cp-input cp-a" id="cp-a" min="0" max="100" placeholder="A" step="1" />
+          <span class="cp-a-unit">%</span>
+        </span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────
+var scanResults = [];
+var availableStyles = [];
+var availableVariables = [];
+var nodeIds = [];
+var mappings = {};
+
+// Imported mapping rules state
+var importedRules = null;
+var importedFileName = '';
+var currentDirection = '';
+var activePickerKey = '';
+var skipLocked = true;
+var lockedNodeIds = [];
+var detectedMode = '';
+
+// ─── DOM refs ────────────────────────────────────────────
+var mainContent = document.getElementById('main-content');
+var statusEl = document.getElementById('status');
+var btnRescan = document.getElementById('btn-rescan');
+var btnApply = document.getElementById('btn-apply');
+var btnImportRule = document.getElementById('btn-import-rule');
+var fileInput = document.getElementById('file-input');
+var importSection = document.getElementById('import-section');
+var ruleNameEl = document.getElementById('rule-name');
+var ruleCountEl = document.getElementById('rule-count');
+var btnClearRule = document.getElementById('btn-clear-rule');
+var dirLightToDark = document.getElementById('dir-light-to-dark');
+var dirDarkToLight = document.getElementById('dir-dark-to-light');
+var importStatsEl = document.getElementById('import-stats');
+var colorPicker = document.getElementById('color-picker');
+
+// ─── Helpers ─────────────────────────────────────────────
+
+function hexToRgb(hex) {
+  hex = hex.replace('#', '');
+  var dashIdx = hex.indexOf('-');
+  if (dashIdx > 0) hex = hex.substring(0, dashIdx);
+  if (hex.length === 3) {
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  }
+  if (hex.length === 6) {
+    return {
+      r: parseInt(hex.substring(0, 2), 16) / 255,
+      g: parseInt(hex.substring(2, 4), 16) / 255,
+      b: parseInt(hex.substring(4, 6), 16) / 255,
+      a: 1
+    };
+  }
+  if (hex.length === 8) {
+    return {
+      r: parseInt(hex.substring(0, 2), 16) / 255,
+      g: parseInt(hex.substring(2, 4), 16) / 255,
+      b: parseInt(hex.substring(4, 6), 16) / 255,
+      a: parseInt(hex.substring(6, 8), 16) / 255
+    };
+  }
+  return null;
+}
+
+function rgbToHex(r, g, b, a) {
+  var toHex = function(v) { return Math.round(v * 255).toString(16).padStart(2, '0'); };
+  var hex = '#' + toHex(r) + toHex(g) + toHex(b);
+  if (a !== undefined && a < 0.999) hex += toHex(a);
+  return hex.toUpperCase();
+}
+
+function colorsMatchTolerant(c1, c2, tolerance) {
+  tolerance = tolerance || 0.02;
+  return (
+    Math.abs(c1.r - c2.r) <= tolerance &&
+    Math.abs(c1.g - c2.g) <= tolerance &&
+    Math.abs(c1.b - c2.b) <= tolerance &&
+    Math.abs((c1.a !== undefined ? c1.a : 1) - (c2.a !== undefined ? c2.a : 1)) <= tolerance
+  );
+}
+
+function setStatus(msg, type) {
+  statusEl.textContent = msg;
+  statusEl.className = 'status-bar';
+  if (type) statusEl.classList.add(type);
+}
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ─── Import Mapping Rule Logic ───────────────────────────
+
+function applyMappingRules(direction) {
+  if (!importedRules || importedRules.length === 0 || scanResults.length === 0) return;
+
+  currentDirection = direction;
+
+  var sourceKey = direction === 'light-to-dark' ? 'light' : 'dark';
+  var targetKey = direction === 'light-to-dark' ? 'dark' : 'light';
+
+  dirLightToDark.classList.toggle('active', direction === 'light-to-dark');
+  dirDarkToLight.classList.toggle('active', direction === 'dark-to-light');
+
+  var matched = 0;
+  var unmatched = 0;
+
+  mappings = {};
+
+  for (var i = 0; i < scanResults.length; i++) {
+    var c = scanResults[i];
+    var rule = findMatchingRule(c, sourceKey);
+
+    if (rule) {
+      var target = rule[targetKey];
+      mappings[c.colorKey] = {
+        strategy: 'raw',
+        targetColor: { r: target.r, g: target.g, b: target.b, a: target.a },
+        targetAlpha: target.a,
+        matchedBy: rule._matchedBy || 'name',
+        ruleName: rule.name
+      };
+      matched++;
+    } else {
+      unmatched++;
+    }
+  }
+
+  importStatsEl.classList.remove('hidden');
+  if (unmatched > 0) {
+    importStatsEl.className = 'import-stats has-unmatched';
+    importStatsEl.textContent = '已匹配 ' + matched + ' 项，' + unmatched + ' 项未匹配（可手动填写）';
+  } else {
+    importStatsEl.className = 'import-stats';
+    importStatsEl.textContent = '全部 ' + matched + ' 项颜色已匹配映射规则';
+  }
+
+  renderColorList();
+  updateApplyButton();
+  setStatus('映射规则已应用：' + matched + ' 匹配 / ' + unmatched + ' 未匹配', matched > 0 ? 'success' : '');
+}
+
+function findMatchingRule(scannedColor, sourceKey) {
+  if (scannedColor.styleName && scannedColor.styleName !== 'External library style') {
+    for (var i = 0; i < importedRules.length; i++) {
+      if (importedRules[i].name === scannedColor.styleName) {
+        importedRules[i]._matchedBy = 'name';
+        return importedRules[i];
+      }
+    }
+    for (var i = 0; i < importedRules.length; i++) {
+      var ruleName = importedRules[i].name;
+      if (ruleName.indexOf(scannedColor.styleName) >= 0 || scannedColor.styleName.indexOf(ruleName) >= 0) {
+        importedRules[i]._matchedBy = 'name-partial';
+        return importedRules[i];
+      }
+    }
+  }
+
+  var scannedRgba = parseScannedColorValue(scannedColor);
+  if (scannedRgba) {
+    for (var i = 0; i < importedRules.length; i++) {
+      var ruleSource = importedRules[i][sourceKey];
+      if (ruleSource && colorsMatchTolerant(scannedRgba, ruleSource, 0.02)) {
+        importedRules[i]._matchedBy = 'color';
+        return importedRules[i];
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseScannedColorValue(scannedColor) {
+  var key = scannedColor.colorKey;
+  var match = key.match(/^rgba?\(([\d.]+),([\d.]+),([\d.]+)(?:,([\d.]+))?\)$/);
+  if (match) {
+    return {
+      r: parseFloat(match[1]),
+      g: parseFloat(match[2]),
+      b: parseFloat(match[3]),
+      a: match[4] !== undefined ? parseFloat(match[4]) : 1.0
+    };
+  }
+  return null;
+}
+
+
+// ─── Render ──────────────────────────────────────────────
+
+function renderColorList() {
+  if (scanResults.length === 0) {
+    mainContent.innerHTML = '<div class="selection-hint"><div class="hint-icon">🖼</div><p>在 Figma 中选择画板或分组，</p><p>点击 <strong>扫描</strong> 按钮识别颜色。</p></div>';
+    return;
+  }
+
+  var html = '<div class="color-list-container">';
+
+  // Scan summary card
+  var modeLabel = detectedMode ? (detectedMode === 'light' ? '浅色' : '深色') : '';
+  var hasLocked = lockedNodeIds.length > 0;
+
+  html += '<div class="scan-summary">';
+
+  // Row 1: Color count + mode
+  html += '<div class="summary-row">';
+  html += '<div class="summary-left">';
+  html += '<span class="icon icon-color"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg></span>';
+  html += '扫描颜色数量';
+  html += '<span class="badge badge-count">' + scanResults.length + '</span>';
+  html += '</div>';
+  html += '<div class="summary-right">';
+  if (detectedMode) {
+    html += '<span class="badge badge-mode">' + modeLabel + '模式</span>';
+  }
+  html += '</div>';
+  html += '</div>';
+
+  // Row 2: Locked layers + toggle
+  html += '<div class="summary-row">';
+  html += '<div class="summary-left">';
+  html += '<span class="icon icon-lock"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>';
+  html += '已锁定图层';
+  html += '<span class="badge badge-count">' + lockedNodeIds.length + '</span>';
+  html += '</div>';
+  html += '<div class="summary-right">';
+  html += '<span class="toggle-label-inline">跳过</span>';
+  html += '<label class="toggle-switch" style="width:32px;height:18px">';
+  html += '<input type="checkbox" id="toggle-skip-locked" ' + (skipLocked ? 'checked' : '') + (hasLocked ? '' : ' disabled') + ' />';
+  html += '<span class="toggle-slider"></span>';
+  html += '</label>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '</div>'; // /scan-summary
+
+  html += '<div class="color-list">';
+
+  for (var i = 0; i < scanResults.length; i++) {
+    var c = scanResults[i];
+    var mapping = mappings[c.colorKey];
+
+    var hasMapping = false;
+    var targetHex = '';
+
+    if (mapping) {
+      if (mapping.targetColor) {
+        hasMapping = true;
+        targetHex = rgbToHex(mapping.targetColor.r, mapping.targetColor.g, mapping.targetColor.b, mapping.targetColor.a);
+      } else if (mapping.strategy === 'style' && mapping.targetStyleId) {
+        for (var si = 0; si < availableStyles.length; si++) {
+          if (availableStyles[si].id === mapping.targetStyleId && availableStyles[si].hex) {
+            var rgb = hexToRgb(availableStyles[si].hex);
+            if (rgb) mapping.targetColor = rgb;
+            hasMapping = true;
+            targetHex = availableStyles[si].hex;
+            break;
+          }
+        }
+        if (!targetHex) hasMapping = true;
+      } else if (mapping.targetStyleId || mapping.targetVariableId) {
+        hasMapping = true;
+      }
+    }
+
+    var itemClass = 'color-item';
+    if (importedRules && currentDirection) {
+      itemClass += hasMapping ? ' matched' : ' unmatched';
+    }
+
+    html += '<div class="' + itemClass + '" data-key="' + c.colorKey + '">';
+
+    html += '<div class="color-item-left">';
+    // Source swatch
+    html += '<div class="swatch" style="background:' + c.hex + '"></div>';
+    // Source info
+    html += '<div class="source-info">';
+    html += '<span class="source-hex">' + c.hex + '</span>';
+    html += '<span class="source-count">' + c.count + '&times;</span>';
+    html += '<div class="source-meta">';
+    if (c.styleName && c.styleName !== 'External library style') {
+      html += escapeHtml(c.styleName);
+    } else if (c.variableName) {
+      html += escapeHtml(c.variableName);
+    } else {
+      html += c.source;
+    }
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    // Arrow
+    html += '<span class="arrow">→</span>';
+
+    html += '<div class="color-item-right">';
+    // Target swatch
+    var targetSwatchClass = hasMapping && targetHex ? 'target-swatch mapped' : 'target-swatch';
+    var targetSwatchStyle = targetHex ? 'background:' + targetHex + ';' : '';
+    html += '<div class="' + targetSwatchClass + '" style="' + targetSwatchStyle + '" data-key="' + c.colorKey + '" title="目标颜色"></div>';
+    // Target hex input
+    html += '<input class="target-input" type="text" placeholder="#HEX" data-key="' + c.colorKey + '" value="' + targetHex + '" />';
+    // Clear button
+    html += '<button class="clear-btn" data-key="' + c.colorKey + '" title="清除映射">&times;</button>';
+    html += '</div>';
+
+    html += '</div>';
+  }
+
+  html += '</div></div>';
+  mainContent.innerHTML = html;
+
+  bindColorItemEvents();
+  updateApplyButton();
+}
+
+function bindColorItemEvents() {
+  var hexInputs = mainContent.querySelectorAll('.target-input');
+  for (var i = 0; i < hexInputs.length; i++) {
+    hexInputs[i].addEventListener('input', onHexInput);
+    hexInputs[i].addEventListener('blur', onHexBlur);
+  }
+
+  var clears = mainContent.querySelectorAll('.clear-btn');
+  for (var i = 0; i < clears.length; i++) {
+    clears[i].addEventListener('click', onClearMapping);
+  }
+
+  var swatches = mainContent.querySelectorAll('.target-swatch');
+  for (var i = 0; i < swatches.length; i++) {
+    swatches[i].addEventListener('click', onSwatchClick);
+  }
+
+  var toggle = document.getElementById('toggle-skip-locked');
+  if (toggle) {
+    toggle.addEventListener('change', function (e) {
+      skipLocked = e.target.checked;
+    });
+  }
+}
+
+function updateApplyButton() {
+  var hasMapping = false;
+  for (var key in mappings) {
+    var m = mappings[key];
+    if (m && (m.targetColor || m.targetStyleId || m.targetVariableId)) {
+      hasMapping = true;
+      break;
+    }
+  }
+  btnApply.disabled = !hasMapping;
+}
+
+// ─── Event Handlers ──────────────────────────────────────
+
+function onHexInput(e) {
+  var key = e.target.dataset.key;
+  var hex = e.target.value.trim();
+  var rgb = hexToRgb(hex);
+
+  if (rgb) {
+    mappings[key] = mappings[key] || {};
+    mappings[key].targetColor = rgb;
+    mappings[key].targetAlpha = rgb.a;
+    mappings[key].strategy = 'raw';
+    delete mappings[key].targetStyleId;
+  } else if (hex === '') {
+    delete mappings[key];
+  }
+
+  updateSwatchAndSelect(key);
+  updateApplyButton();
+}
+
+function onHexBlur(e) {
+  var key = e.target.dataset.key;
+  var hex = e.target.value.trim();
+  if (hex && !hexToRgb(hex)) {
+    e.target.style.borderColor = '#e74c3c';
+  } else {
+    e.target.style.borderColor = '';
+  }
+}
+
+function onClearMapping(e) {
+  var key = e.target.dataset.key;
+  delete mappings[key];
+
+  var hexInput = mainContent.querySelector('.target-input[data-key="' + key + '"]');
+  if (hexInput) {
+    hexInput.value = '';
+    hexInput.placeholder = '#HEX';
+    hexInput.style.borderColor = '';
+  }
+
+  updateSwatchAndSelect(key);
+  updateApplyButton();
+}
+
+// Old onSwatchClick removed - see cp section
+
+function updateSwatchAndSelect(key) {
+  var swatch = mainContent.querySelector('.target-swatch[data-key="' + key + '"]');
+  var mapping = mappings[key];
+
+  if (swatch) {
+    if (mapping && mapping.targetColor) {
+      swatch.classList.add('mapped');
+      swatch.style.background = rgbToHex(mapping.targetColor.r, mapping.targetColor.g, mapping.targetColor.b, mapping.targetColor.a);
+    } else {
+      swatch.classList.remove('mapped');
+      swatch.style.background = '';
+    }
+  }
+}
+
+// ─── Color Picker Events ─────────────────────────────────
+
+// ─── Custom Color Picker ──────────────────────────────
+
+var cp = {
+  overlay: document.getElementById('cp-overlay'),
+  panel: document.getElementById('cp-panel'),
+  canvas: document.getElementById('cp-canvas'),
+  ctx: document.getElementById('cp-canvas').getContext('2d'),
+  crosshair: document.getElementById('cp-crosshair'),
+  swatch: document.getElementById('cp-current-swatch'),
+  eyedropper: document.getElementById('cp-eyedropper'),
+  close: document.getElementById('cp-close'),
+  hueBg: document.getElementById('cp-hue-bg'),
+  hueThumb: document.getElementById('cp-hue-thumb'),
+  opacityBg: document.getElementById('cp-opacity-bg'),
+  opacityThumb: document.getElementById('cp-opacity-thumb'),
+  mode: document.getElementById('cp-mode'),
+  rInput: document.getElementById('cp-r'),
+  gInput: document.getElementById('cp-g'),
+  bInput: document.getElementById('cp-b'),
+  aInput: document.getElementById('cp-a'),
+  inputs: null,
+  hue: 0,
+  sat: 1,
+  val: 1,
+  alpha: 1,
+  targetKey: '',
+  isDragging: false,
+  dragType: ''
+};
+
+cp.inputs = [cp.rInput, cp.gInput, cp.bInput, cp.aInput];
+
+function hsvToRgb(h, s, v) {
+  var hi = Math.floor(h / 60) % 6;
+  var f = h / 60 - Math.floor(h / 60);
+  var p = v * (1 - s);
+  var q = v * (1 - f * s);
+  var t = v * (1 - (1 - f) * s);
+  var r, g, b;
+  if (hi === 0) { r = v; g = t; b = p; }
+  else if (hi === 1) { r = q; g = v; b = p; }
+  else if (hi === 2) { r = p; g = v; b = t; }
+  else if (hi === 3) { r = p; g = q; b = v; }
+  else if (hi === 4) { r = t; g = p; b = v; }
+  else { r = v; g = p; b = q; }
+  return { r: r, g: g, b: b };
+}
+
+function rgbToHex8(r, g, b) {
+  var toHex = function(v) { return Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0'); };
+  return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+
+function cpDrawCanvas() {
+  var w = cp.canvas.width, h = cp.canvas.height;
+  var ctx = cp.ctx;
+  var hue = cp.hue;
+
+  for (var x = 0; x < w; x++) {
+    for (var y = 0; y < h; y++) {
+      var sat = x / w;
+      var val = 1 - y / h;
+      var rgb = hsvToRgb(hue, sat, val);
+      ctx.fillStyle = 'rgb(' + Math.round(rgb.r * 255) + ',' + Math.round(rgb.g * 255) + ',' + Math.round(rgb.b * 255) + ')';
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
+function cpUpdateFromHSV() {
+  var rgb = hsvToRgb(cp.hue, cp.sat, cp.val);
+  var r8 = Math.round(rgb.r * 255);
+  var g8 = Math.round(rgb.g * 255);
+  var b8 = Math.round(rgb.b * 255);
+  var a100 = Math.round(cp.alpha * 100);
+
+  cp.rInput.value = r8;
+  cp.gInput.value = g8;
+  cp.bInput.value = b8;
+  cp.aInput.value = a100;
+
+  var hex = rgbToHex8(r8, g8, b8);
+  var rgba = 'rgba(' + r8 + ',' + g8 + ',' + b8 + ',' + cp.alpha + ')';
+  cp.swatch.style.background = rgba;
+
+  // Update the mapping
+  if (cp.targetKey) {
+    mappings[cp.targetKey] = mappings[cp.targetKey] || {};
+    mappings[cp.targetKey].targetColor = { r: rgb.r, g: rgb.g, b: rgb.b, a: cp.alpha };
+    mappings[cp.targetKey].targetAlpha = cp.alpha;
+    mappings[cp.targetKey].strategy = 'raw';
+    delete mappings[cp.targetKey].targetStyleId;
+
+    // Update the hex input in the color list
+    var hexInput = mainContent.querySelector('.target-input[data-key="' + cp.targetKey + '"]');
+    if (hexInput) {
+      hexInput.value = hex;
+      hexInput.style.borderColor = '';
+    }
+    updateSwatchAndSelect(cp.targetKey);
+    updateApplyButton();
+  }
+
+  // Crosshair position
+  var cx = cp.sat * cp.canvas.width;
+  var cy = (1 - cp.val) * cp.canvas.height;
+  cp.crosshair.style.left = cx + 'px';
+  cp.crosshair.style.top = cy + 'px';
+
+  // Hue thumb - constrained within slider
+  var thumbHalf = 7;
+  var hueW = cp.hueBg.offsetWidth;
+  cp.hueThumb.style.left = (thumbHalf + (cp.hue / 360) * Math.max(0, hueW - thumbHalf * 2)) + 'px';
+
+  // Opacity thumb - constrained within slider
+  var opaW = cp.opacityBg.offsetWidth;
+  cp.opacityThumb.style.left = (thumbHalf + cp.alpha * Math.max(0, opaW - thumbHalf * 2)) + 'px';
+  cp.opacityBg.style.setProperty('--cp-color', hex);
+
+  // Update HSL inputs if in HSL mode
+  if (cp.mode.value === 'hsl' && cp.hInput) {
+    var hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    cp.hInput.value = Math.round(hsl.h);
+    cp.sInput.value = Math.round(hsl.s);
+    cp.lInput.value = Math.round(hsl.l);
+  }
+
+  // Update hex input if in HEX mode
+  if (cp.mode.value === 'hex' && cp.hexInput) {
+    cp.hexInput.value = hex;
+  }
+}
+
+function cpOpen(key, currentColor) {
+  cp.targetKey = key || '';
+  // Default to white (hue=0, sat=0, val=1, alpha=1)
+  cp.hue = 0;
+  cp.sat = 0;
+  cp.val = 1;
+  cp.alpha = 1;
+
+  if (currentColor) {
+    var r = currentColor.r, g = currentColor.g, b = currentColor.b;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var delta = max - min;
+    cp.val = max;
+    if (max === 0) { cp.sat = 0; cp.hue = 0; }
+    else { cp.sat = delta / max; }
+    if (delta === 0) { cp.hue = 0; }
+    else if (max === r) { cp.hue = 60 * (((g - b) / delta) % 6); }
+    else if (max === g) { cp.hue = 60 * (((b - r) / delta) + 2); }
+    else { cp.hue = 60 * (((r - g) / delta) + 4); }
+    if (cp.hue < 0) cp.hue += 360;
+    cp.alpha = currentColor.a !== undefined ? currentColor.a : 1;
+  }
+  cpDrawCanvas();
+  cpUpdateFromHSV();
+  cp.overlay.classList.remove('hidden');
+}
+
+function cpClose() {
+  cp.targetKey = '';
+  cp.overlay.classList.add('hidden');
+}
+
+// Canvas click/drag
+function cpCanvasPos(e) {
+  var rect = cp.canvas.getBoundingClientRect();
+  var x = e.clientX - rect.left;
+  var y = e.clientY - rect.top;
+  cp.sat = Math.max(0, Math.min(1, x / rect.width));
+  cp.val = Math.max(0, Math.min(1, 1 - y / rect.height));
+  cpDrawCanvas();
+  cpUpdateFromHSV();
+}
+
+cp.canvas.addEventListener('mousedown', function (e) {
+  cp.isDragging = true;
+  cp.dragType = 'canvas';
+  cpCanvasPos(e);
+});
+
+// Slider drag helpers
+function cpSliderPos(e, sliderEl, cb) {
+  var rect = sliderEl.getBoundingClientRect();
+  var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  cb(pct);
+  cpDrawCanvas();
+  cpUpdateFromHSV();
+}
+
+cp.hueBg.addEventListener('mousedown', function (e) {
+  cp.isDragging = true;
+  cp.dragType = 'hue';
+  cpSliderPos(e, cp.hueBg, function(p) { cp.hue = p * 360; });
+});
+
+cp.opacityBg.addEventListener('mousedown', function (e) {
+  cp.isDragging = true;
+  cp.dragType = 'opacity';
+  cpSliderPos(e, cp.opacityBg, function(p) { cp.alpha = p; });
+});
+
+document.addEventListener('mousemove', function (e) {
+  if (!cp.isDragging) return;
+  if (cp.dragType === 'canvas') { cpCanvasPos(e); }
+  else if (cp.dragType === 'hue') { cpSliderPos(e, cp.hueBg, function(p) { cp.hue = p * 360; }); }
+  else if (cp.dragType === 'opacity') { cpSliderPos(e, cp.opacityBg, function(p) { cp.alpha = p; }); }
+  e.preventDefault();
+});
+
+document.addEventListener('mouseup', function () {
+  cp.isDragging = false;
+  cp.dragType = '';
+});
+
+// Input changes
+cp.rInput.addEventListener('input', cpFromRGB);
+cp.gInput.addEventListener('input', cpFromRGB);
+cp.bInput.addEventListener('input', cpFromRGB);
+cp.aInput.addEventListener('input', cpFromAlpha);
+
+function cpFromRGB() {
+  var r = parseInt(cp.rInput.value) || 0;
+  var g = parseInt(cp.gInput.value) || 0;
+  var b = parseInt(cp.bInput.value) || 0;
+  r = Math.max(0, Math.min(255, r));
+  g = Math.max(0, Math.min(255, g));
+  b = Math.max(0, Math.min(255, b));
+
+  var max = Math.max(r, g, b) / 255, min = Math.min(r, g, b) / 255;
+  var delta = max - min;
+  cp.val = max;
+  if (max === 0) { cp.sat = 0; cp.hue = 0; }
+  else { cp.sat = delta / max; }
+  if (delta === 0) { cp.hue = 0; }
+  else {
+    var rr = r / 255, gg = g / 255, bb = b / 255;
+    var d = delta;
+    if (max === rr) { cp.hue = 60 * (((gg - bb) / d) % 6); }
+    else if (max === gg) { cp.hue = 60 * (((bb - rr) / d) + 2); }
+    else { cp.hue = 60 * (((rr - gg) / d) + 4); }
+    if (cp.hue < 0) cp.hue += 360;
+  }
+  cpDrawCanvas();
+  cpUpdateFromHSV();
+}
+
+function cpFromAlpha() {
+  cp.alpha = Math.max(0, Math.min(100, parseInt(cp.aInput.value) || 0)) / 100;
+  cpUpdateFromHSV();
+}
+
+// Mode switch
+function rgbToHsl(r, g, b) {
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var h, s, l = (max + min) / 2;
+  if (max === min) { h = 0; s = 0; }
+  else {
+    var d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+cp.mode.addEventListener('change', function () {
+  var mode = cp.mode.value;
+  var r = parseInt(cp.rInput.value) || 0;
+  var g = parseInt(cp.gInput.value) || 0;
+  var b = parseInt(cp.bInput.value) || 0;
+
+  // Hide all extra inputs first
+  if (cp.hexInput) cp.hexInput.style.display = 'none';
+  if (cp.hInput) { cp.hInput.style.display = 'none'; cp.sInput.style.display = 'none'; cp.lInput.style.display = 'none'; }
+  for (var i = 0; i < 3; i++) cp.inputs[i].style.display = 'none';
+  cp.aInput.style.display = 'none';
+
+  if (mode === 'hex') {
+    if (!cp.hexInput) {
+      cp.hexInput = document.createElement('input');
+      cp.hexInput.type = 'text';
+      cp.hexInput.className = 'cp-input';
+      cp.hexInput.placeholder = '#HEX';
+      cp.hexInput.style.width = '100%';
+      cp.inputs[0].parentNode.insertBefore(cp.hexInput, cp.inputs[0]);
+      cp.hexInput.addEventListener('input', function () {
+        var hex = cp.hexInput.value.trim();
+        var rgb = hexToRgb(hex);
+        if (rgb) {
+          cp.rInput.value = Math.round(rgb.r * 255);
+          cp.gInput.value = Math.round(rgb.g * 255);
+          cp.bInput.value = Math.round(rgb.b * 255);
+          cpFromRGB();
+        }
+      });
+    }
+    cp.hexInput.value = rgbToHex8(r, g, b);
+    cp.hexInput.style.display = '';
+    cp.aInput.style.display = '';
+  } else if (mode === 'hsl') {
+    if (!cp.hInput) {
+      var parent = cp.inputs[0].parentNode;
+      cp.hInput = document.createElement('input');
+      cp.hInput.type = 'number';
+      cp.hInput.className = 'cp-input';
+      cp.hInput.placeholder = 'H';
+      cp.hInput.min = 0; cp.hInput.max = 360;
+      cp.hInput.style.width = '100%';
+      cp.hInput.style.color = '#6C50E8';
+      parent.insertBefore(cp.hInput, cp.inputs[0]);
+
+      cp.sInput = document.createElement('input');
+      cp.sInput.type = 'number';
+      cp.sInput.className = 'cp-input';
+      cp.sInput.placeholder = 'S';
+      cp.sInput.min = 0; cp.sInput.max = 100;
+      cp.sInput.style.width = '100%';
+      cp.sInput.style.color = '#27ae60';
+      parent.insertBefore(cp.sInput, cp.inputs[1]);
+
+      cp.lInput = document.createElement('input');
+      cp.lInput.type = 'number';
+      cp.lInput.className = 'cp-input';
+      cp.lInput.placeholder = 'L';
+      cp.lInput.min = 0; cp.lInput.max = 100;
+      cp.lInput.style.width = '100%';
+      cp.lInput.style.color = '#2980b9';
+      parent.insertBefore(cp.lInput, cp.inputs[2]);
+
+      cp.hInput.addEventListener('input', cpFromHSL);
+      cp.sInput.addEventListener('input', cpFromHSL);
+      cp.lInput.addEventListener('input', cpFromHSL);
+    }
+    var hsl = rgbToHsl(r / 255, g / 255, b / 255);
+    cp.hInput.value = Math.round(hsl.h);
+    cp.sInput.value = Math.round(hsl.s);
+    cp.lInput.value = Math.round(hsl.l);
+    cp.hInput.style.display = '';
+    cp.sInput.style.display = '';
+    cp.lInput.style.display = '';
+    cp.aInput.style.display = '';
+  } else { // rgb
+    for (var i = 0; i < 3; i++) cp.inputs[i].style.display = '';
+    cp.aInput.style.display = '';
+  }
+});
+
+function cpFromHSL() {
+  var h = parseInt(cp.hInput.value) || 0;
+  var s = parseInt(cp.sInput.value) || 0;
+  var l = parseInt(cp.lInput.value) || 0;
+  h = Math.max(0, Math.min(360, h));
+  s = Math.max(0, Math.min(100, s)) / 100;
+  l = Math.max(0, Math.min(100, l)) / 100;
+
+  // HSL to RGB
+  var c = (1 - Math.abs(2 * l - 1)) * s;
+  var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  var m = l - c / 2;
+  var r, g, b;
+  if (h < 60) { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+
+  cp.rInput.value = Math.round((r + m) * 255);
+  cp.gInput.value = Math.round((g + m) * 255);
+  cp.bInput.value = Math.round((b + m) * 255);
+  cpFromRGB();
+}
+
+// Close
+cp.close.addEventListener('click', cpClose);
+cp.overlay.addEventListener('click', function (e) {
+  if (e.target === cp.overlay) cpClose();
+});
+
+// Eyedropper - open native color picker
+cp.eyedropper.addEventListener('click', function () {
+  cp.eyedropper.classList.add('active');
+  colorPicker.value = rgbToHex8(parseInt(cp.rInput.value) || 0, parseInt(cp.gInput.value) || 0, parseInt(cp.bInput.value) || 0);
+  colorPicker.click();
+});
+
+// Native color picker change -> update custom picker
+colorPicker.addEventListener('input', function () {
+  cp.eyedropper.classList.remove('active');
+  var hex = colorPicker.value;
+  var rgb = hexToRgb(hex);
+  if (rgb) {
+    cp.rInput.value = Math.round(rgb.r * 255);
+    cp.gInput.value = Math.round(rgb.g * 255);
+    cp.bInput.value = Math.round(rgb.b * 255);
+    cpFromRGB();
+  }
+});
+
+// Override native color picker
+function onSwatchClick(e) {
+  var key = e.target.dataset.key;
+  var mapping = mappings[key];
+  cpOpen(key, mapping ? mapping.targetColor : null);
+}
+
+// ─── Button Actions ──────────────────────────────────────
+
+btnRescan.addEventListener('click', function () {
+  setStatus('正在扫描颜色...');
+  btnApply.disabled = true;
+  mappings = {};
+  currentDirection = '';
+  skipLocked = true;
+  lockedNodeIds = [];
+  detectedMode = '';
+  dirLightToDark.classList.remove('active');
+  dirDarkToLight.classList.remove('active');
+  importStatsEl.classList.add('hidden');
+  parent.postMessage({ pluginMessage: { type: 'scan-colors' } }, '*');
+});
+
+btnImportRule.addEventListener('click', function () {
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', function (e) {
+  var file = e.target.files[0];
+  if (!file) return;
+
+  var reader = new FileReader();
+  reader.onload = function (event) {
+    try {
+      var data = JSON.parse(event.target.result);
+
+      if (!Array.isArray(data) || data.length === 0) {
+        setStatus('无效的映射规则文件：需要 JSON 数组格式。', 'error');
+        return;
+      }
+
+      var sample = data[0];
+      if (!sample.name || !sample.light || !sample.dark) {
+        setStatus('无效的映射规则格式：每项需要 name, light, dark 字段。', 'error');
+        return;
+      }
+
+      importedRules = data;
+      importedFileName = file.name;
+      currentDirection = '';
+
+      importSection.classList.remove('hidden');
+      ruleNameEl.textContent = file.name;
+      ruleCountEl.textContent = data.length + ' 条规则';
+      dirLightToDark.classList.remove('active');
+      dirDarkToLight.classList.remove('active');
+      importStatsEl.classList.add('hidden');
+
+      setStatus('映射规则已导入（' + data.length + ' 条）。选择转换方向以应用。');
+
+      if (scanResults.length > 0) {
+        if (detectedMode === 'light') {
+          applyMappingRules('light-to-dark');
+        } else if (detectedMode === 'dark') {
+          applyMappingRules('dark-to-light');
+        } else {
+          setStatus('映射规则已导入。点击转换方向按钮自动填充映射。');
+        }
+      }
+    } catch (err) {
+      setStatus('JSON 解析失败：' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+
+  fileInput.value = '';
+});
+
+btnClearRule.addEventListener('click', function () {
+  importedRules = null;
+  importedFileName = '';
+  currentDirection = '';
+  importSection.classList.add('hidden');
+  importStatsEl.classList.add('hidden');
+
+  mappings = {};
+  renderColorList();
+  updateApplyButton();
+  setStatus('映射规则已清除。');
+});
+
+dirLightToDark.addEventListener('click', function () {
+  if (!importedRules) return;
+  if (scanResults.length === 0) {
+    setStatus('请先扫描颜色，再应用映射规则。', 'error');
+    return;
+  }
+  applyMappingRules('light-to-dark');
+});
+
+dirDarkToLight.addEventListener('click', function () {
+  if (!importedRules) return;
+  if (scanResults.length === 0) {
+    setStatus('请先扫描颜色，再应用映射规则。', 'error');
+    return;
+  }
+  applyMappingRules('dark-to-light');
+});
+
+btnApply.addEventListener('click', function () {
+  var mappingArray = [];
+  for (var i = 0; i < scanResults.length; i++) {
+    var c = scanResults[i];
+    var mapping = mappings[c.colorKey];
+    if (mapping) {
+      var m = {
+        sourceColorKey: c.colorKey,
+        strategy: mapping.strategy || 'raw'
+      };
+
+      if (m.strategy === 'raw' && mapping.targetColor) {
+        m.targetColor = mapping.targetColor;
+        m.targetAlpha = mapping.targetAlpha !== undefined ? mapping.targetAlpha : (mapping.targetColor.a !== undefined ? mapping.targetColor.a : 1);
+      }
+      if (m.strategy === 'style' && mapping.targetStyleId) {
+        m.targetStyleId = mapping.targetStyleId;
+      }
+      if (m.strategy === 'variable' && mapping.targetVariableId) {
+        m.targetVariableId = mapping.targetVariableId;
+      }
+
+      mappingArray.push(m);
+    }
+  }
+
+  if (mappingArray.length === 0) {
+    setStatus('未定义任何颜色映射。', 'error');
+    return;
+  }
+
+  setStatus('正在应用更改...');
+  btnApply.disabled = true;
+
+  parent.postMessage({
+    pluginMessage: {
+      type: 'apply-swap',
+      nodeIds: nodeIds,
+      mappings: mappingArray,
+      skipLocked: skipLocked
+    }
+  }, '*');
+});
+
+// ─── Message Handlers ────────────────────────────────────
+
+// ─── HTTP Polling Client ────────────────────────────
+// 使用 fetch 替代 WebSocket（兼容 Figma 沙箱环境）
+
+const BRIDGE_URL = 'http://localhost:8766';
+let pollingTimer = null;
+let isPolling = false;
+
+function updateBridgeStatus(text, isError) {
+  var el = document.getElementById('wsStatus');
+  if (el) {
+    el.textContent = text;
+    el.style.color = isError ? '#e74c3c' : '';
+  }
+}
+
+async function pollForCommand() {
+  if (isPolling) return;
+  isPolling = true;
+
+  try {
+    var resp = await fetch(BRIDGE_URL + '/poll');
+
+    if (resp.status === 204) {
+      // 无命令，继续轮询
+      updateBridgeStatus('🟢 桥接已连接（等待指令）');
+      isPolling = false;
+      return;
+    }
+
+    if (!resp.ok) {
+      updateBridgeStatus('🔴 桥接错误: ' + resp.status);
+      isPolling = false;
+      return;
+    }
+
+    var data = await resp.json();
+
+    if (data.hasCommand && data.command) {
+      var cmd = data.command;
+      console.log('[Bridge] 收到指令:', cmd.action, 'id:', cmd.id);
+      updateBridgeStatus('🟡 执行中: ' + cmd.action);
+
+      // 转发给 Figma 主线程
+      parent.postMessage({ pluginMessage: {
+        type: 'ws-execute',
+        wsId: cmd.id,
+        action: cmd.action,
+        data: cmd.data || {}
+      } }, '*');
+    }
+  } catch (e) {
+    // 连接失败（桥接未启动）
+    if (e.message && e.message.includes('fetch')) {
+      // fetch 错误不显示在状态栏上，正常轮询重试
+    } else {
+      updateBridgeStatus('🔴 桥接异常: ' + e.message, true);
+    }
+  }
+
+  isPolling = false;
+}
+
+function startPolling() {
+  if (pollingTimer) return;
+  updateBridgeStatus('🟡 连接桥接中...');
+
+  async function tick() {
+    try {
+      await pollForCommand();
+    } catch (_) {}
+    pollingTimer = setTimeout(tick, 2000); // 每 2 秒轮询
+  }
+
+  // 首次延迟 1 秒，让 UI 先渲染
+  pollingTimer = setTimeout(tick, 1000);
+}
+
+function stopPolling() {
+  if (pollingTimer) {
+    clearTimeout(pollingTimer);
+    pollingTimer = null;
+  }
+}
+
+// 供 main thread 回调: 将执行结果 POST 回桥接服务器
+async function sendBridgeResult(cmdId, data, error) {
+  try {
+    var body = {};
+    if (error) {
+      body.error = error;
+    } else {
+      body.data = data;
+    }
+
+    await fetch(BRIDGE_URL + '/result/' + cmdId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    updateBridgeStatus('🟢 结果已提交（等待指令）');
+  } catch (e) {
+    console.error('[Bridge] 提交结果失败:', e.message);
+  }
+}
+
+// 启动轮询
+startPolling();
+
+// ─── 原有消息处理器 ────────────────────────────────────
+
+window.onmessage = function (event) {
+  var msg = event.data.pluginMessage;
+  if (!msg) return;
+
+  if (msg.type === 'scan-results') {
+    scanResults = msg.colors;
+    availableStyles = msg.availableStyles || [];
+    availableVariables = msg.availableVariables || [];
+    nodeIds = msg.nodeIds || [];
+    lockedNodeIds = msg.lockedNodeIds || [];
+    skipLocked = true;
+    detectedMode = msg.detectedMode || '';
+    mappings = {};
+
+    renderColorList();
+    var modeHint = detectedMode ? '（检测为' + (detectedMode === 'light' ? '浅色' : '深色') + '模式）' : '';
+    setStatus('扫描完成：' + scanResults.length + ' 种颜色' + modeHint + (importedRules ? '，正在应用映射规则...' : ''));
+
+    if (importedRules && currentDirection) {
+      applyMappingRules(currentDirection);
+    }
+  }
+
+  if (msg.type === 'scan-error') {
+    scanResults = [];
+    availableStyles = [];
+    availableVariables = [];
+    nodeIds = [];
+    lockedNodeIds = [];
+    skipLocked = true;
+    detectedMode = '';
+    mappings = {};
+    mainContent.innerHTML = '<div class="selection-hint"><div class="hint-icon">🖼</div><p>在 Figma 中选择画板或分组，</p><p>点击 <strong>扫描</strong> 按钮识别颜色。</p></div>';
+    setStatus(msg.message, 'error');
+  }
+
+  if (msg.type === 'swap-done') {
+    setStatus('完成！已替换 ' + msg.changed + ' 处颜色。按 Cmd+Z 可撤销。', 'success');
+    btnApply.disabled = false;
+  }
+
+  if (msg.type === 'swap-error') {
+    setStatus('错误：' + msg.message, 'error');
+    btnApply.disabled = false;
+  }
+
+  // ─── 桥接结果转发 ────────────────────────────────────
+  if (msg.type === 'ws-result') {
+    if (msg.error) {
+      sendBridgeResult(msg.wsId, null, msg.error);
+    } else {
+      sendBridgeResult(msg.wsId, msg.data, null);
+    }
+  }
+};
+</script>
+</body>
+</html>

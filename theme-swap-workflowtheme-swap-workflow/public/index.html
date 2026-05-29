@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Theme Swap Console</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f7; color: #1d1d1f; min-height: 100vh; }
+.container { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.5px; }
+.subtitle { color: #86868b; font-size: 14px; margin-bottom: 32px; }
+
+.card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+.form-row { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap; }
+.form-group { flex: 1; min-width: 200px; }
+.form-group label { display: block; font-size: 12px; font-weight: 500; color: #6e6e73; margin-bottom: 4px; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; transition: border-color 0.2s; }
+.form-group input:focus, .form-group select:focus { border-color: #0071e3; outline: none; box-shadow: 0 0 0 3px rgba(0,113,227,0.15); }
+
+.btn { padding: 8px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn-primary { background: #0071e3; color: #fff; }
+.btn-primary:hover { background: #0077ed; }
+.btn-primary:disabled { background: #999; cursor: not-allowed; }
+.btn-secondary { background: #e8e8ed; color: #1d1d1f; }
+.btn-secondary:hover { background: #d2d2d7; }
+.btn-success { background: #34c759; color: #fff; }
+.btn-danger { background: #ff3b30; color: #fff; }
+.btn-small { padding: 4px 12px; font-size: 12px; }
+
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.dot-green { background: #34c759; }
+.dot-red { background: #ff3b30; }
+.dot-yellow { background: #ff9f0a; }
+
+.size-grid { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.size-preset { padding: 6px 14px; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+.size-preset:hover { border-color: #0071e3; }
+.size-preset.active { border-color: #0071e3; background: #e8f4ff; color: #0071e3; font-weight: 600; }
+.size-preset.custom { border-style: dashed; }
+
+.log-area { background: #1d1d1f; color: #32d74b; padding: 16px; border-radius: 8px; font-family: 'SF Mono', Menlo, monospace; font-size: 13px; line-height: 1.6; min-height: 200px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; }
+.log-area .error { color: #ff453a; }
+.log-area .info { color: #64d2ff; }
+.log-area .warn { color: #ffd60a; }
+.log-area .success { color: #32d74b; }
+.log-area .dim { color: #8e8e93; }
+.log-area .highlight { color: #fff; font-weight: 600; }
+
+.steps { display: flex; gap: 4px; margin-bottom: 16px; }
+.step { flex: 1; padding: 10px; text-align: center; border-radius: 8px; font-size: 13px; background: #f5f5f7; color: #86868b; }
+.step.active { background: #0071e3; color: #fff; font-weight: 600; }
+.step.done { background: #34c759; color: #fff; }
+
+.frame-list { max-height: 300px; overflow-y: auto; }
+.frame-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+.frame-item:last-child { border-bottom: none; }
+.frame-item input[type="checkbox"] { margin-right: 10px; }
+
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: #f0f0f0; color: #6e6e73; }
+.tag-light { background: #fff3cd; color: #856404; }
+.tag-dark { background: #d1d8e0; color: #2c3e50; }
+
+.tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid #d2d2d7; }
+.tab { padding: 8px 20px; border: none; background: none; cursor: pointer; font-size: 14px; color: #6e6e73; border-bottom: 2px solid transparent; }
+.tab.active { color: #0071e3; border-bottom-color: #0071e3; font-weight: 500; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.mapping-preview { max-height: 200px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; padding: 8px; font-family: 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.5; }
+
+.hidden { display: none !important; }
+.flex { display: flex; gap: 8px; align-items: center; }
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mb-8 { margin-bottom: 8px; }
+.text-center { text-align: center; }
+.text-sm { font-size: 13px; color: #86868b; }
+.toggle-switch { position:relative; display:inline-block; width:44px; height:24px; }
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#c8c8cc; border-radius:24px; transition:0.3s; }
+.toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:0.3s; }
+.toggle-switch input:checked + .toggle-slider { background:#34c759; }
+.toggle-switch input:checked + .toggle-slider:before { transform:translateX(20px); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔄 Theme Swap Console</h1>
+  <p class="subtitle">Figma 主题换色工作流控制台</p>
+
+  <!-- 步骤指示器 -->
+  <div class="steps" id="stepIndicator">
+    <div class="step active" data-step="1">1. 配置</div>
+    <div class="step" data-step="2">2. 链接 & 尺寸</div>
+    <div class="step" data-step="3">3. 映射规则</div>
+    <div class="step" data-step="4">4. 执行</div>
+  </div>
+
+  <!-- ===== 步骤1: 配置 ===== -->
+  <div class="card" id="configCard">
+    <h2>⚙️ API 配置</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Figma Personal Access Token</label>
+        <input type="password" id="figmaToken" placeholder="figd_..." onchange="saveConfig()">
+      </div>
+      <div class="form-group">
+        <label>DeepSeek API Key</label>
+        <input type="password" id="deepseekKey" placeholder="sk-..." onchange="saveConfig()">
+      </div>
+      <button class="btn btn-secondary btn-small" onclick="validateConfig()">验证</button>
+    </div>
+    <div id="configStatus" class="text-sm mt-8"></div>
+  </div>
+
+  <!-- ===== 步骤2: 链接 & 尺寸 ===== -->
+  <div class="card" id="fileCard">
+    <h2>📄 Figma 文件</h2>
+    <div class="form-row">
+      <div class="form-group" style="flex:3">
+        <label>Figma 文件链接或 File Key</label>
+        <input type="text" id="fileUrl" placeholder="https://www.figma.com/design/xxx/... 或 file key">
+      </div>
+      <button class="btn btn-primary" onclick="listFrames()">🔍 获取画板</button>
+    </div>
+
+    <div id="frameSection" class="hidden mt-16">
+      <h2 style="font-size:14px;font-weight:600;margin-bottom:12px">📐 画板尺寸筛选</h2>
+      <div class="size-grid" id="sizePresets">
+        <span class="size-preset" data-w="1920" data-h="1080">1920×1080</span>
+        <span class="size-preset" data-w="1440" data-h="900">1440×900</span>
+        <span class="size-preset" data-w="1280" data-h="720">1280×720</span>
+        <span class="size-preset" data-w="390" data-h="844">390×844 (iPhone)</span>
+        <span class="size-preset" data-w="375" data-h="812">375×812 (iPhone X)</span>
+        <span class="size-preset" data-w="360" data-h="640">360×640 (Android)</span>
+        <span class="size-preset custom" data-w="0" data-h="0">✏️ 自定义</span>
+      </div>
+      <div class="form-row hidden" id="customSizeRow">
+        <div class="form-group"><label>宽度 (px)</label><input type="number" id="customW" placeholder="0=不限" min="0"></div>
+        <div class="form-group"><label>高度 (px)</label><input type="number" id="customH" placeholder="0=不限" min="0"></div>
+        <button class="btn btn-secondary btn-small" onclick="applyCustomSize()">应用</button>
+      </div>
+
+      <div id="frameList" class="frame-list mt-8"></div>
+      <div id="frameCount" class="text-sm mt-8"></div>
+    </div>
+  </div>
+
+  <!-- ===== 步骤3: 映射规则 ===== -->
+  <div class="card" id="mappingCard">
+    <h2>🎨 颜色映射规则</h2>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="upload" onclick="switchTab('upload')">📤 上传 JSON</button>
+      <button class="tab" data-tab="ai" onclick="switchTab('ai')">🤖 AI 生成</button>
+    </div>
+
+    <!-- Tab: 上传 JSON -->
+    <div class="tab-content active" id="tabUpload">
+      <div class="form-row">
+        <div class="form-group">
+          <label>选择颜色映射 JSON 文件</label>
+          <input type="file" id="mappingFile" accept=".json" onchange="handleFileUpload(event)">
+        </div>
+      </div>
+      <div class="form-row mt-8">
+        <div class="form-group">
+          <label>映射规则预览</label>
+          <div id="mappingPreview" class="mapping-preview"><span class="dim">尚未上传映射规则</span></div>
+        </div>
+      </div>
+      <div id="mappingUploadStatus" class="text-sm mt-8"></div>
+    </div>
+
+    <!-- Tab: AI 生成 -->
+    <div class="tab-content" id="tabAi">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Light 模式 Figma 文件链接</label>
+          <input type="text" id="aiLightUrl" placeholder="https://www.figma.com/...">
+        </div>
+        <div class="form-group">
+          <label>Dark 模式 Figma 文件链接</label>
+          <input type="text" id="aiDarkUrl" placeholder="https://www.figma.com/...">
+        </div>
+      </div>
+      <button class="btn btn-primary" id="aiGenerateBtn" onclick="aiGenerateMapping()">🤖 AI 生成映射</button>
+      <div id="aiStatus" class="text-sm mt-8"></div>
+      <div id="aiResult" class="mapping-preview mt-8 hidden"></div>
+    </div>
+
+    <div class="form-row mt-16">
+      <div class="form-group">
+        <label>换色方向</label>
+        <select id="direction">
+          <option value="dark-to-light">🌞 Dark → Light（深色变浅色）</option>
+          <option value="light-to-dark">🌙 Light → Dark（浅色变深色）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>🔒 跳过锁定图层</label>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+          <label class="toggle-switch">
+            <input type="checkbox" id="skipLocked" checked>
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="skipLockedLabel" style="font-size:13px;color:#34c759;">已开启</span>
+        </div>
+      </div>      </div>
+    </div>
+  </div>
+
+  <!-- ===== 步骤4: 执行 ===== -->
+  <div class="card" id="execCard">
+    <h2>🚀 执行工作流</h2>
+    <button class="btn btn-success btn-large" id="execBtn" onclick="executeWorkflow()">▶️ 开始执行</button>
+
+    <div id="execLog" class="log-area mt-16 hidden"><span class="dim">等待执行...</span></div>
+    <div id="execInfo" class="card mt-16 hidden" style="background:#f9f9f9;border:1px solid #e0e0e0;">
+      <h2>💡 需要你操作</h2>
+      <p id="execHint" class="text-sm"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── 配置 ───────────────────────────────────────────────
+const API_BASE = '';
+
+function saveConfig() {
+  // 内存保存，页面刷新后需重新配置
+}
+
+async function validateConfig() {
+  const s = document.getElementById('configStatus');
+  const figmaToken = document.getElementById('figmaToken').value;
+  const deepseekKey = document.getElementById('deepseekKey').value;
+
+  let results = [];
+
+  if (figmaToken) {
+    try {
+      const r = await fetch(API_BASE + '/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({figmaToken}) });
+      const d = await r.json();
+      const r2 = await fetch(API_BASE + '/api/validate-token', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({figmaToken}) });
+      const d2 = await r2.json();
+      results.push(d2.ok ? '✅ Figma: ' + d2.email : '❌ Figma: ' + (d2.error || '失败'));
+    } catch(e) { results.push('❌ Figma: ' + e.message); }
+  }
+
+  if (deepseekKey) {
+    try {
+      const r = await fetch(API_BASE + '/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({deepseekKey}) });
+      await r.json();
+      const r2 = await fetch(API_BASE + '/api/validate-deepseek', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({deepseekKey}) });
+      const d2 = await r2.json();
+      results.push(d2.ok ? '✅ DeepSeek: ' + d2.model : '❌ DeepSeek: ' + (d2.error || '失败'));
+    } catch(e) { results.push('❌ DeepSeek: ' + e.message); }
+  }
+
+  s.innerHTML = results.join('<br>') || '<span class="dim">未配置任何 Token</span>';
+}
+
+// ─── 画板尺寸筛选 ──────────────────────────────────────
+let selectedMinW = 0, selectedMaxW = Infinity;
+let currentFrames = [], currentFileKey = '';
+
+document.getElementById('sizePresets').addEventListener('click', function(e) {
+  const preset = e.target.closest('.size-preset');
+  if (!preset) return;
+  document.querySelectorAll('.size-preset').forEach(p => p.classList.remove('active'));
+  preset.classList.add('active');
+
+  const w = parseInt(preset.dataset.w);
+  const h = parseInt(preset.dataset.h);
+
+  if (preset.classList.contains('custom')) {
+    document.getElementById('customSizeRow').classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('customSizeRow').classList.add('hidden');
+  selectedMinW = w;
+  selectedMaxW = w;
+  filterFrames();
+});
+
+function applyCustomSize() {
+  const w = parseInt(document.getElementById('customW').value) || 0;
+  const h = parseInt(document.getElementById('customH').value) || 0;
+  if (w > 0) { selectedMinW = w; selectedMaxW = w; }
+  else { selectedMinW = 0; selectedMaxW = Infinity; }
+  filterFrames();
+}
+
+function filterFrames() {
+  if (!currentFrames.length) return;
+  const filtered = currentFrames.filter(f =>
+    f.width >= selectedMinW && f.width <= selectedMaxW
+  );
+  renderFrames(filtered);
+}
+
+function renderFrames(frames) {
+  const el = document.getElementById('frameList');
+  if (frames.length === 0) {
+    el.innerHTML = '<div class="text-sm" style="padding:16px;text-align:center;color:#86868b;">未找到符合条件的画板</div>';
+    document.getElementById('frameCount').textContent = '0 个画板';
+    return;
+  }
+  el.innerHTML = frames.map(f => `
+    <div class="frame-item">
+      <span><input type="checkbox" checked disabled> ${f.name}</span>
+      <span><span class="tag">${f.width}×${f.height}</span> <span class="text-sm">${f.id}</span></span>
+    </div>
+  `).join('');
+  document.getElementById('frameCount').textContent = frames.length + ' 个画板（全部勾选，执行时全量处理）';
+}
+
+async function listFrames() {
+  const figmaToken = document.getElementById('figmaToken').value;
+  if (!figmaToken) { alert('请先配置 Figma Token'); return; }
+
+  const fileUrl = document.getElementById('fileUrl').value.trim();
+  if (!fileUrl) { alert('请输入 Figma 链接'); return; }
+
+  await saveAndValidateConfig();
+
+  const el = document.getElementById('frameList');
+  el.innerHTML = '<div class="text-sm" style="padding:16px;text-align:center;">🔄 正在获取画板列表...</div>';
+
+  try {
+    const r = await fetch(API_BASE + '/api/list-frames', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({fileUrl, figmaToken})
+    });
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = '<div class="text-sm error" style="padding:16px;">❌ ' + d.error + '</div>'; return; }
+
+    currentFrames = d.allFrames ? currentFrames : d.filteredFrames;
+    currentFileKey = d.fileKey;
+
+    // 存储所有画板，用筛选来切
+    // 重新获取不带筛选的
+    const r2 = await fetch(API_BASE + '/api/list-frames', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({fileUrl, figmaToken, minWidth:0, maxWidth:99999})
+    });
+    const d2 = await r2.json();
+    currentFrames = d2.filteredFrames || [];
+
+    document.getElementById('frameSection').classList.remove('hidden');
+    renderFrames(currentFrames);
+    selectedMinW = 0; selectedMaxW = Infinity;
+    document.querySelectorAll('.size-preset').forEach(p => p.classList.remove('active'));
+  } catch(e) {
+    el.innerHTML = '<div class="text-sm" style="padding:16px;color:#ff453a;">❌ 请求失败: ' + e.message + '</div>';
+  }
+}
+
+async function saveAndValidateConfig() {
+  const figmaToken = document.getElementById('figmaToken').value;
+  const deepseekKey = document.getElementById('deepseekKey').value;
+  await fetch(API_BASE + '/api/config', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({figmaToken, deepseekKey})
+  });
+}
+
+// ─── 映射规则 ───────────────────────────────────────────
+let currentMapping = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab' + name.charAt(0).toUpperCase() + name.slice(1)));
+}
+
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      const mapping = JSON.parse(e.target.result);
+      if (!Array.isArray(mapping)) throw new Error('JSON 必须是数组');
+
+      // 验证格式
+      mapping.forEach((item, i) => {
+        if (!item.light || !item.dark) throw new Error('第 ' + (i+1) + ' 项缺少 light 或 dark 字段');
+      });
+
+      currentMapping = mapping;
+      document.getElementById('mappingPreview').innerHTML = JSON.stringify(mapping.slice(0, 10), null, 2)
+        + (mapping.length > 10 ? '\n\n... 共 ' + mapping.length + ' 条' : '');
+
+      // 上传到服务端
+      const r = await fetch(API_BASE + '/api/upload-mapping', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({mapping})
+      });
+      const d = await r.json();
+      document.getElementById('mappingUploadStatus').innerHTML = '✅ 已加载 ' + d.total + ' 条映射规则';
+    } catch(err) {
+      document.getElementById('mappingUploadStatus').innerHTML = '❌ ' + err.message;
+    }
+  };
+  reader.readAsText(file);
+}
+
+async function aiGenerateMapping() {
+  const btn = document.getElementById('aiGenerateBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中...';
+
+  const s = document.getElementById('aiStatus');
+  s.innerHTML = '🔄 正在提取颜色并调用 AI...';
+
+  const lightUrl = document.getElementById('aiLightUrl').value.trim();
+  const darkUrl = document.getElementById('aiDarkUrl').value.trim();
+  const figmaToken = document.getElementById('figmaToken').value;
+  const deepseekKey = document.getElementById('deepseekKey').value;
+
+  if (!lightUrl || !darkUrl) { s.innerHTML = '❌ 请提供两个 Figma 文件链接'; btn.disabled = false; btn.textContent = '🤖 AI 生成映射'; return; }
+
+  try {
+    const r = await fetch(API_BASE + '/api/ai/generate-mapping', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({lightFileUrl: lightUrl, darkFileUrl: darkUrl, figmaToken, deepseekKey})
+    });
+    const d = await r.json();
+    if (!r.ok) { s.innerHTML = '❌ ' + d.error; btn.disabled = false; btn.textContent = '🤖 AI 生成映射'; return; }
+
+    currentMapping = d.mapping;
+    document.getElementById('aiResult').classList.remove('hidden');
+    document.getElementById('aiResult').innerHTML = JSON.stringify(d.mapping.slice(0, 15), null, 2)
+      + (d.mapping.length > 15 ? '\n\n... 共 ' + d.mapping.length + ' 条' : '');
+
+    // 自动加载到服务端
+    await fetch(API_BASE + '/api/upload-mapping', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({mapping: d.mapping})
+    });
+
+    s.innerHTML = '✅ 已生成 ' + d.total + ' 条颜色映射规则';
+  } catch(e) {
+    s.innerHTML = '❌ ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🤖 AI 生成映射';
+}
+
+// ─── 执行工作流 ─────────────────────────────────────────
+function log(msg, type) {
+  const el = document.getElementById('execLog');
+  el.classList.remove('hidden');
+  const cls = type || '';
+  el.innerHTML += '<span class="' + cls + '">' + msg + '</span>\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function setHint(text) {
+  document.getElementById('execInfo').classList.remove('hidden');
+  document.getElementById('execHint').textContent = text;
+}
+
+function clearLog() {
+  document.getElementById('execLog').innerHTML = '';
+  document.getElementById('execLog').classList.add('hidden');
+  document.getElementById('execInfo').classList.add('hidden');
+}
+
+function updateStep(step) {
+  document.querySelectorAll('.step').forEach(s => {
+    const n = parseInt(s.dataset.step);
+    s.classList.toggle('active', n === step);
+    s.classList.toggle('done', n < step);
+  });
+}
+
+async function executeWorkflow() {
+  const figmaToken = document.getElementById('figmaToken').value;
+  const fileUrl = document.getElementById('fileUrl').value.trim();
+  const direction = document.getElementById('direction').value;
+
+  if (!figmaToken) { alert('请先配置 Figma Token'); return; }
+  if (!fileUrl) { alert('请输入 Figma 链接'); return; }
+  // 注意：换色使用 automate-swap.js 内置的颜色映射规则文件（BE12_color_mapping_rules.json）
+  // 上传映射功能仅用于参考和 AI 生成预览
+
+  const btn = document.getElementById('execBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 执行中...';
+
+  clearLog();
+  updateStep(1);
+
+  // ─── 步骤 1: 获取画板 ─────────────────────────────
+  log('=== 🚀 开始执行工作流 ===', 'highlight');
+  log('方向: ' + direction, 'info');
+  log('');
+
+  updateStep(2);
+  log('📄 [1/4] 获取文件画板...', 'info');
+  log('  链接: ' + fileUrl, 'dim');
+
+  try {
+    const r1 = await fetch(API_BASE + '/api/list-frames', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({fileUrl, figmaToken, minWidth: selectedMinW, maxWidth: selectedMaxW})
+    });
+    const d1 = await r1.json();
+    if (!r1.ok) { log('❌ 失败: ' + d1.error, 'error'); btn.disabled = false; btn.textContent = '▶️ 开始执行'; return; }
+
+    const frames = d1.filteredFrames || [];
+    log('  ✅ 找到 ' + frames.length + ' 个画板', 'success');
+    log('  文件: ' + d1.fileName, 'dim');
+    frames.forEach(f => log('    [' + f.id + '] ' + f.name + ' (' + f.width + 'x' + f.height + ')', 'dim'));
+    log('');
+
+    if (frames.length === 0) {
+      log('⚠️ 无符合条件的画板，退出', 'warn');
+      btn.disabled = false; btn.textContent = '▶️ 开始执行';
+      return;
+    }
+
+    // ─── 步骤 2: 检查桥接 + 扫描颜色 ──────────────────
+    updateStep(3);
+    log('🔌 [2/4] 检查桥接与插件连接...', 'info');
+
+    try {
+      const healthR = await fetch(API_BASE + '/api/health');
+      const healthD = await healthR.json();
+      if (!healthD.bridge) {
+        log('❌ 桥接服务器未启动', 'error');
+        setHint('请先运行桥接服务器: node bridge-server.js，然后在 Figma 中打开插件');
+        btn.disabled = false; btn.textContent = '▶️ 开始执行';
+        return;
+      }
+      if (!healthD.plugin) {
+        log('⚠️ 桥接已连接但插件未响应，请确认插件已打开', 'warn');
+        setHint('桥接已启动，但 Figma 插件未响应。请在 Figma 中打开 Theme Color Swapper 插件');
+        btn.disabled = false; btn.textContent = '▶️ 开始执行';
+        return;
+      }
+      log('  ✅ 桥接在线 | 插件在线', 'success');
+    } catch(e) {
+      log('❌ 连接检查失败: ' + e.message, 'error');
+      setHint('请先运行桥接服务器: node bridge-server.js');
+      btn.disabled = false; btn.textContent = '▶️ 开始执行';
+      return;
+    }
+
+    log('');
+
+    // ─── 步骤 3: 执行换色 ─────────────────────────────
+    log('🎨 [3/4] 执行换色...', 'info');
+    log('  调用 automate-swap.js 执行完整流程', 'dim');
+
+    try {
+      const swapR = await fetch(API_BASE + '/api/swap', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({fileUrl, figmaToken, direction, skipLocked: document.getElementById('skipLocked').checked, minWidth: selectedMinW, maxWidth: selectedMaxW})
+      });
+      const swapD = await swapR.json();
+      if (!swapR.ok) {
+        log('❌ 换色失败: ' + swapD.error, 'error');
+        setHint('换色执行失败，请检查 Figma 中插件状态。错误: ' + swapD.error);
+        btn.disabled = false; btn.textContent = '▶️ 开始执行';
+        return;
+      }
+      log('  ✅ 换色完成！共处理 ' + swapD.frames.length + ' 个画板', 'success');
+      log('  方向: ' + swapD.direction, 'dim');
+    } catch(e) {
+      log('❌ 换色失败: ' + e.message, 'error');
+      setHint('换色执行异常: ' + e.message);
+      btn.disabled = false; btn.textContent = '▶️ 开始执行';
+      return;
+    }
+
+    log('');
+
+    // ─── 完成 ─────────────────────────────────────────
+    updateStep(4);
+    log('✅ [4/4] 全部完成！', 'highlight');
+    log('');
+    log('请在 Figma 中查看结果。', 'info');
+    setHint('🎉 换色已完成！请在 Figma 中查看。如需撤销，在 Figma 中按 Cmd+Z。');
+
+  } catch(e) {
+    log('❌ ' + e.message, 'error');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '▶️ 开始执行';
+}
+
+// ─── 初始化 ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async function() {
+  // 跳过锁定图层开关
+  const skipLockedCheck = document.getElementById("skipLocked");
+  if (skipLockedCheck) {
+    skipLockedCheck.addEventListener("change", function() {
+      document.getElementById("skipLockedLabel").textContent = this.checked ? "已开启" : "已关闭";
+      document.getElementById("skipLockedLabel").style.color = this.checked ? "#34c759" : "#86868b";
+    });
+  }
+
+  // 检查桥接状态
+  try {
+    const r = await fetch(API_BASE + '/api/health');
+    const d = await r.json();
+    const statusEl = document.getElementById('configStatus');
+    if (d.bridge && d.plugin) {
+      statusEl.innerHTML += '<span class="status-dot dot-green"></span>桥接在线 | 插件连接中 ... ';
+    } else if (d.bridge) {
+      statusEl.innerHTML += '<span class="status-dot dot-yellow"></span>桥接已启动，插件未连接（请在 Figma 打开插件）';
+    } else {
+      statusEl.innerHTML += '<span class="status-dot dot-red"></span>桥接未启动（需要: node bridge-server.js）';
+    }
+  } catch(e) {}
+});
+</script>
+</body>
+</html>
