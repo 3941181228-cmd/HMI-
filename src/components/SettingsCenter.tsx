@@ -232,7 +232,16 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       }
       fetch('/api/jimeng/status').then(r => r.json()).then(d => {
         if (d.ok) {
-          setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'connected' as const } : p))
+          setApiProviders(prev => prev.map(p => {
+            if (p.id === 'jimeng') {
+              return { 
+                ...p, 
+                status: 'connected' as const,
+                apiKey: 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09'
+              }
+            }
+            return p
+          }))
         }
       }).catch(() => {})
       fetch('/api/openai/status').then(r => r.json()).then(d => {
@@ -252,25 +261,26 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
   const saveApiConfig = async () => {
     const provider = apiProviders.find(p => p.id === activeApiProvider) || apiProviders[0]
     const apiKey = provider.apiKey.trim()
-    if (!apiKey) return
 
     try {
       if (activeApiProvider === 'openai') {
-        const res = await fetch('/api/openai/save_key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey }),
-        })
-        const data = await res.json()
-        if (data.ok) {
-          updateProvider(activeApiProvider, { status: 'connected' })
-          localStorage.setItem('api_config_status', JSON.stringify({ provider: 'openai', configuredAt: Date.now() }))
+        if (apiKey) {
+          const res = await fetch('/api/openai/save_key', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey }),
+          })
+          const data = await res.json()
+          if (data.ok) {
+            updateProvider(activeApiProvider, { status: 'connected' })
+            localStorage.setItem('api_config_status', JSON.stringify({ provider: 'openai', configuredAt: Date.now() }))
+          }
         }
       } else if (activeApiProvider === 'jimeng' || activeApiProvider === 'ark') {
         const res = await fetch('/api/jimeng/save_key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey }),
+          body: JSON.stringify({ api_key: apiKey || 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09' }),
         })
         const data = await res.json()
         if (data.ok) {
@@ -284,7 +294,6 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
   const testApiConnection = async () => {
     const provider = apiProviders.find(p => p.id === activeApiProvider) || apiProviders[0]
     const apiKey = provider.apiKey.trim()
-    if (!apiKey) return
 
     setIsTestingApi(true)
     updateProvider(activeApiProvider, { status: 'connecting' })
@@ -297,6 +306,12 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
 
     try {
       if (activeApiProvider === 'openai') {
+        if (!apiKey) {
+          setTestSteps(prev => prev.map((s, i) => i === 0 ? { ...s, done: false, step: `请先输入 OpenAI Key` } : s))
+          setIsTestingApi(false)
+          updateProvider(activeApiProvider, { status: 'disconnected' })
+          return
+        }
         const res = await fetch('/api/openai/save_key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -313,7 +328,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         const res = await fetch('/api/jimeng/save_key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey }),
+          body: JSON.stringify({ api_key: apiKey || 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09' }),
         })
         const data = await res.json()
         if (!data.ok) {
@@ -733,7 +748,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         variant="glow" 
         size="sm" 
         onClick={testApiConnection} 
-        disabled={isTestingApi || currentProvider.status === 'connected' || !currentProvider.apiKey.trim()}
+        disabled={isTestingApi || currentProvider.status === 'connected' || !(currentProvider.apiKey.trim() || currentProvider.id === 'jimeng' || currentProvider.id === 'ark')}
         className="w-full gap-2 mt-4"
       >
         <RefreshCw size={14} className={isTestingApi ? 'animate-spin' : ''} />
@@ -863,7 +878,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
               </button>
             </div>
           </div>
-          <Button variant="default" size="sm" className="w-full gap-2 mt-2" onClick={saveApiConfig} disabled={!currentProvider.apiKey.trim()}>
+          <Button variant="default" size="sm" className="w-full gap-2 mt-2" onClick={saveApiConfig} disabled={!(currentProvider.apiKey.trim() || currentProvider.id === 'jimeng' || currentProvider.id === 'ark')}>
             <Key size={14} />
             保存配置
           </Button>
