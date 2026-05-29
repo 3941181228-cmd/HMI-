@@ -521,7 +521,7 @@ export default function CreationDashboard({ records, onOpenProject, onStartGener
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                src={previewImage}
+                src={getProxyImageUrl(previewImage)}
                 alt="Preview"
                 className="max-w-full max-h-full object-contain rounded-lg"
                 onClick={(e) => e.stopPropagation()}
