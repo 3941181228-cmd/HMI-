@@ -57,7 +57,7 @@ test('empty save validates the configured default and errors never echo the key'
   assert.ok(!(await failed.text()).includes(env.JIMENG_API_KEY))
 })
 
-test('a manually entered key overrides the missing or deployed default for status, save and generation', async () => {
+test('a manually entered key supports status, save and generation when no default is deployed', async () => {
   const manualKey = 'manual-browser-key'
   const withKey = (path, data) => request(path, data, { 'X-Jimeng-Api-Key': manualKey })
   const upstream = async (_, options) => {
@@ -67,4 +67,37 @@ test('a manually entered key overrides the missing or deployed default for statu
   assert.equal((await (await handleApi(withKey('status'), {}, upstream)).json()).ok, true)
   assert.equal((await (await handleApi(withKey('save_key', { api_key: manualKey }), {}, upstream)).json()).ok, true)
   assert.equal((await (await handleApi(withKey('text2image', { prompt: 'test' }), {}, upstream)).json()).ok, true)
+})
+
+test('a configured server default is not replaced by a stale browser key', async () => {
+  const response = await handleApi(request('status', undefined, { 'X-Jimeng-Api-Key': 'stale-browser-key' }), env,
+    async (_, options) => {
+      assert.equal(options.headers.Authorization, `Bearer ${env.JIMENG_API_KEY}`)
+      return Response.json({})
+    })
+  assert.equal((await response.json()).ok, true)
+})
+
+test('saving a manual key validates that candidate even when a default is deployed', async () => {
+  const manualKey = 'manual-browser-key'
+  const response = await handleApi(request('save_key', { api_key: manualKey }, { 'X-Jimeng-Api-Key': manualKey }), env,
+    async (_, options) => {
+      assert.equal(options.headers.Authorization, `Bearer ${manualKey}`)
+      return Response.json({}, { status: 401 })
+    })
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    configured: true,
+    credit: 'API Key 无效或已过期',
+    message: 'API Key 无效或已过期',
+  })
+})
+
+test('the save endpoint accepts a body-only manual key without a deployed default', async () => {
+  const manualKey = 'body-only-key'
+  const response = await handleApi(request('save_key', { api_key: manualKey }), {}, async (_, options) => {
+    assert.equal(options.headers.Authorization, `Bearer ${manualKey}`)
+    return Response.json({})
+  })
+  assert.equal((await response.json()).ok, true)
 })

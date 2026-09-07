@@ -16,7 +16,6 @@ import {
   getStoredOpenAIKey,
   getStoredVisionEndpoint,
   getStoredFigmaToken,
-  saveArkKey as saveArkKeyLocal,
   saveOpenAIKey as saveOpenAIKeyLocal,
   saveVisionEndpoint as saveVisionEndpointLocal,
   saveFigmaToken as saveFigmaTokenLocal,
@@ -188,8 +187,6 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
     if (!arkKey.trim()) return
     setSavingArk(true)
     setMessage(null)
-    // 先保存到本地存储，确保即使后端请求失败也能本地持久化
-    saveArkKeyLocal(arkKey.trim())
     const result = await saveApiKey(arkKey.trim())
     setSavingArk(false)
     if (result.ok) {
@@ -197,10 +194,9 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
       setMessage({ ok: true, text: '即梦 API Key 保存成功！' })
       notify({ app: 'aiGenerate', title: '保存成功', body: '即梦 API Key 已配置并验证通过' })
     } else {
-      // 即使后端保存失败，本地也已保存
-      setArkConnected(true)
-      setMessage({ ok: true, text: '即梦 API Key 已本地保存' })
-      notify({ app: 'aiGenerate', title: '已本地保存', body: '即梦 API Key 已保存到本地（后端同步失败）' })
+      setArkConnected(false)
+      setMessage({ ok: false, text: result.message || '即梦 API Key 验证失败' })
+      notify({ app: 'aiGenerate', title: '保存失败', body: result.message || '请检查 API Key 后重试' })
     }
   }
 

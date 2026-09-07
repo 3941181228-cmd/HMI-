@@ -14,8 +14,8 @@ export interface ApiKeyStatus {
   credit: string
 }
 
-function jimengHeaders(json = false): HeadersInit {
-  const key = getStoredArkKey().trim()
+function jimengHeaders(json = false, overrideKey?: string): HeadersInit {
+  const key = overrideKey === undefined ? getStoredArkKey().trim() : overrideKey.trim()
   return {
     ...(json ? { 'Content-Type': 'application/json' } : {}),
     ...(key ? { 'X-Jimeng-Api-Key': key } : {}),
@@ -39,13 +39,16 @@ export async function checkLoginStatus(): Promise<ApiKeyStatus> {
 export async function saveApiKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
   try {
     const key = apiKey.trim()
-    if (key) saveArkKey(key)
     const res = await fetch('/api/jimeng/save_key', {
       method: 'POST',
-      headers: jimengHeaders(true),
+      headers: jimengHeaders(true, key),
       body: JSON.stringify({ api_key: key }),
     })
     const data = await res.json().catch(() => null)
+    if (res.ok && data?.ok) {
+      if (key) saveArkKey(key)
+      return data
+    }
     if (res.ok && data) return data
     return { ok: false, message: data?.message || data?.error || `保存失败（${res.status}）` }
   } catch {

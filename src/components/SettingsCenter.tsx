@@ -225,6 +225,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
 
   useEffect(() => {
     if (open) {
+      setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'connecting' as const } : p))
       // 加载已保存的Figma Token，如果没有则使用默认Token
       let savedFigmaToken = getStoredFigmaToken()
       if (!savedFigmaToken && DEFAULT_FIGMA_TOKEN) {
@@ -261,8 +262,10 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
             return p
           }))
           localStorage.setItem('api_config_status', JSON.stringify({ provider: 'jimeng', configuredAt: Date.now() }))
+        } else {
+          setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'disconnected' as const } : p))
         }
-      }).catch(() => {})
+      }).catch(() => setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'disconnected' as const } : p)))
       fetch('/api/openai/status').then(r => r.json()).then(d => {
         if (d.ok) {
           setApiProviders(prev => prev.map(p => p.id === 'openai' ? { ...p, status: 'connected' as const } : p))
@@ -363,7 +366,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       } else if (activeApiProvider === 'jimeng' || activeApiProvider === 'ark') {
         const data = await saveJimengApiKey(apiKey)
         if (data.ok) {
-          updateProvider(activeApiProvider, { status: 'connected' })
+          updateProvider(activeApiProvider, { status: 'connected', apiKey: '' })
           localStorage.setItem('api_config_status', JSON.stringify({ provider: activeApiProvider, configuredAt: Date.now() }))
           notify({ app: 'aiGenerate', title: '配置已保存', body: `${provider.name} API Key 已保存成功` })
         } else {
