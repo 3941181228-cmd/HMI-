@@ -11,6 +11,7 @@ import {
 import { Button } from './ui/button'
 import { themes as hmiThemes, type HMITheme, type HSLValue } from '@/data/themeData'
 import { getStoredFigmaToken, saveFigmaToken } from '@/services/apiStorage'
+import { checkLoginStatus, saveApiKey as saveJimengApiKey } from '@/services/jimeng'
 import { useSystemSettings } from '@/contexts/SystemSettingsContext'
 
 function hexToHSL(hex: string): { h: number; s: number; l: number } {
@@ -247,7 +248,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       if (savedStatus) {
         setApiProviders(prev => prev.map(p => p.id === savedStatus ? { ...p, status: 'connected' as const } : p))
       }
-      fetch('/api/jimeng/status').then(r => r.json()).then(d => {
+      checkLoginStatus().then(d => {
         if (d.ok) {
           setApiProviders(prev => prev.map(p => {
             if (p.id === 'jimeng') {
@@ -360,12 +361,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           return
         }
       } else if (activeApiProvider === 'jimeng' || activeApiProvider === 'ark') {
-        const res = await fetch('/api/jimeng/save_key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey || '' }),
-        })
-        const data = await res.json()
+        const data = await saveJimengApiKey(apiKey)
         if (data.ok) {
           updateProvider(activeApiProvider, { status: 'connected' })
           localStorage.setItem('api_config_status', JSON.stringify({ provider: activeApiProvider, configuredAt: Date.now() }))
@@ -413,12 +409,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           return
         }
       } else if (activeApiProvider === 'jimeng' || activeApiProvider === 'ark') {
-        const res = await fetch('/api/jimeng/save_key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey || '' }),
-        })
-        const data = await res.json()
+        const data = await saveJimengApiKey(apiKey)
         if (!data.ok) {
           setTestSteps(prev => prev.map((s, i) => i === 0 ? { ...s, done: false, step: `保存 Key 失败` } : s))
           setIsTestingApi(false)

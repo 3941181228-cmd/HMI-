@@ -26,7 +26,8 @@ async function verifyKey(key, upstream) {
 export async function handleApi(request, env, upstream = fetch) {
   const url = new URL(request.url)
   const path = url.pathname
-  const key = env.JIMENG_API_KEY || ''
+  const requestKey = request.headers.get('X-Jimeng-Api-Key')?.trim() || ''
+  const key = requestKey || env.JIMENG_API_KEY || env.ARK_API_KEY || ''
   const error = (message, status = 400) => json({ ok: false, images: [], error: message, message }, status)
   if (!path.startsWith('/api/jimeng/')) return error('此服务尚未配置', 404)
   if (request.method === 'POST' && request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) {
@@ -62,9 +63,8 @@ export async function handleApi(request, env, upstream = fetch) {
   try { data = await request.json() } catch { return error('请求格式无效') }
   if (!data || typeof data !== 'object' || Array.isArray(data)) return error('请求格式无效')
   if (path === '/api/jimeng/save_key') {
-    if (data.api_key && data.api_key !== key) return error('当前使用已配置的默认 API；留空即可验证默认配置')
     const status = await verifyKey(key, upstream)
-    return json({ ...status, message: status.credit })
+    return json({ ...status, message: status.ok ? (requestKey ? 'API Key 已在当前浏览器保存并验证' : '默认 API 已验证') : status.credit })
   }
   if (typeof data.prompt !== 'string' || !data.prompt.trim()) return error('请输入生成描述')
   const body = {

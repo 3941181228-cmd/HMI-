@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL, JIMENG_API_KEY, callArkAPI } from '../_shared'
+import { DEFAULT_MODEL, resolveJimengApiKey, callArkAPI } from '../_shared'
 
 export default async function handler(event: any) {
   if (event.httpMethod !== 'POST') {
@@ -8,7 +8,8 @@ export default async function handler(event: any) {
     }
   }
 
-  if (!JIMENG_API_KEY) {
+  const apiKey = resolveJimengApiKey(event.headers?.['x-jimeng-api-key'])
+  if (!apiKey) {
     return {
       statusCode: 401,
       body: JSON.stringify({ error: '请先配置 API Key' })
@@ -43,7 +44,7 @@ export default async function handler(event: any) {
       watermark: false,
     }
 
-    const result = await callArkAPI(JIMENG_API_KEY, requestBody)
+    const result = await callArkAPI(apiKey, requestBody)
     return {
       statusCode: result.ok ? 200 : 500,
       body: JSON.stringify(result)

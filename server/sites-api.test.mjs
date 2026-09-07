@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { handleApi } from './sites-api.mjs'
 
 const env = { JIMENG_API_KEY: 'test-server-secret' }
-const request = (path, data, headers = {}) => new Request(`https://example.test/api/jimeng/${path}`, data === undefined ? {} : {
+const request = (path, data, headers = {}) => new Request(`https://example.test/api/jimeng/${path}`, data === undefined ? { headers } : {
   method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data),
 })
 
@@ -44,7 +44,6 @@ test('invalid, cross-origin and unconfigured requests make no upstream calls', a
   assert.equal((await handleApi(request('text2image', { prompt: 'x' }, { Origin: 'https://other.test' }), env, noCall)).status, 403)
   assert.equal((await handleApi(request('image2image', { prompt: 'x' }), env, noCall)).status, 400)
   assert.equal((await handleApi(request('text2image'), env, noCall)).status, 405)
-  assert.equal((await handleApi(request('save_key', { api_key: 'other-key' }), env, noCall)).status, 400)
   const badDownload = new Request('https://example.test/api/jimeng/download?url=http://localhost/private')
   assert.equal((await handleApi(badDownload, env, noCall)).status, 400)
 })
@@ -56,4 +55,16 @@ test('empty save validates the configured default and errors never echo the key'
     async () => Response.json({ error: { message: `Rejected ${env.JIMENG_API_KEY}` } }, { status: 401 }))
   assert.equal(failed.status, 401)
   assert.ok(!(await failed.text()).includes(env.JIMENG_API_KEY))
+})
+
+test('a manually entered key overrides the missing or deployed default for status, save and generation', async () => {
+  const manualKey = 'manual-browser-key'
+  const withKey = (path, data) => request(path, data, { 'X-Jimeng-Api-Key': manualKey })
+  const upstream = async (_, options) => {
+    assert.equal(options.headers.Authorization, `Bearer ${manualKey}`)
+    return options.method === 'POST' ? Response.json({ data: [{ url: 'https://image.volces.com/manual.png' }] }) : Response.json({})
+  }
+  assert.equal((await (await handleApi(withKey('status'), {}, upstream)).json()).ok, true)
+  assert.equal((await (await handleApi(withKey('save_key', { api_key: manualKey }), {}, upstream)).json()).ok, true)
+  assert.equal((await (await handleApi(withKey('text2image', { prompt: 'test' }), {}, upstream)).json()).ok, true)
 })

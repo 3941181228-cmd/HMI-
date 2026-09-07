@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { DEFAULT_MODEL, JIMENG_API_KEY, callArkAPI } from '../_shared'
+import { DEFAULT_MODEL, resolveJimengApiKey, callArkAPI } from '../_shared'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -7,7 +7,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  if (!JIMENG_API_KEY) {
+  const apiKey = resolveJimengApiKey(req.headers['x-jimeng-api-key'])
+  if (!apiKey) {
     res.status(401).json({ error: '请先配置 API Key' })
     return
   }
@@ -38,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       watermark: false,
     }
 
-    const result = await callArkAPI(JIMENG_API_KEY, requestBody)
+    const result = await callArkAPI(apiKey, requestBody)
     res.status(result.ok ? 200 : 500).json(result)
   } catch (err) {
     res.status(500).json({ ok: false, images: [], error: String(err) })

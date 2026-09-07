@@ -1,6 +1,9 @@
 export const ARK_BASE = process.env.ARK_BASE || 'https://ark.cn-beijing.volces.com/api/v3'
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'doubao-seedream-5-0-260128'
 export const JIMENG_API_KEY = process.env.JIMENG_API_KEY || process.env.ARK_API_KEY || ''
+export function resolveJimengApiKey(requestKey?: unknown): string {
+  return (typeof requestKey === 'string' ? requestKey.trim() : '') || JIMENG_API_KEY
+}
 export const STORED_VISION_ENDPOINT = 'ep-20260522095644-hdr5h'
 export const FIGMA_API_TOKEN = process.env.FIGMA_API_TOKEN || ''
 // Tripo 3D 生成 API（异步任务模式）

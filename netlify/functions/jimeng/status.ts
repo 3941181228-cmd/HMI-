@@ -1,7 +1,8 @@
-import { ARK_BASE, JIMENG_API_KEY } from '../_shared'
+import { ARK_BASE, resolveJimengApiKey } from '../_shared'
 
 export default async function handler(event: any) {
-  const hasKey = !!JIMENG_API_KEY
+  const key = resolveJimengApiKey(event.headers?.['x-jimeng-api-key'])
+  const hasKey = !!key
   if (!hasKey) {
     return {
       statusCode: 200,
@@ -11,7 +12,7 @@ export default async function handler(event: any) {
 
   try {
     const resp = await fetch(`${ARK_BASE}/models`, {
-      headers: { 'Authorization': `Bearer ${JIMENG_API_KEY}` },
+      headers: { 'Authorization': `Bearer ${key}` },
     })
     if (resp.ok) {
       return {
