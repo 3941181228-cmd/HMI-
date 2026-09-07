@@ -155,8 +155,8 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       description: '字节跳动即梦 AI 图像生成服务',
       status: 'disconnected' as 'disconnected' | 'connecting' | 'connected',
       apiKey: '',
-      endpoint: 'api.jimeng.ai',
-      basePath: '/v1/images/generations',
+      endpoint: 'ark.cn-beijing.volces.com',
+      basePath: '/api/v3/images/generations',
       models: [
         { id: 'seedream-5', name: 'Seedream 5.0', desc: '文生图 & 图生图，2K分辨率', recommended: true, status: 'active' as 'active' | 'available' | 'coming' },
         { id: 'seedream-4', name: 'Seedream 4.0', desc: '文生图，1080P分辨率', recommended: false, status: 'available' as const },
@@ -220,7 +220,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
   const [figmaUserInfo, setFigmaUserInfo] = useState<{ handle?: string; imgUrl?: string; email?: string } | null>(null)
 
   // 默认Figma Token（用户提供）
-  const DEFAULT_FIGMA_TOKEN = 'figd_N5M8sfVIMrOD5Kt4Q4mUVQufPwJPpG_KFYcfazgl'
+  const DEFAULT_FIGMA_TOKEN = ''
 
   useEffect(() => {
     if (open) {
@@ -254,7 +254,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
               return { 
                 ...p, 
                 status: 'connected' as const,
-                apiKey: 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09'
+                apiKey: ''
               }
             }
             return p
@@ -363,7 +363,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         const res = await fetch('/api/jimeng/save_key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey || 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09' }),
+          body: JSON.stringify({ api_key: apiKey || '' }),
         })
         const data = await res.json()
         if (data.ok) {
@@ -389,7 +389,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       { step: '正在保存 API Key...', done: false },
       { step: `正在连接 ${provider.name}...`, done: false },
       { step: 'API 已连接', done: false },
-      { step: '生成服务可用', done: false },
+      { step: '连接验证完成', done: false },
     ])
 
     try {
@@ -416,7 +416,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         const res = await fetch('/api/jimeng/save_key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: apiKey || 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09' }),
+          body: JSON.stringify({ api_key: apiKey || '' }),
         })
         const data = await res.json()
         if (!data.ok) {
@@ -955,7 +955,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
                 type={showApiKeys[currentProvider.id] ? 'text' : 'password'}
                 value={currentProvider.apiKey}
                 onChange={(e) => updateProvider(currentProvider.id, { apiKey: e.target.value })}
-                placeholder="输入 API Key"
+                placeholder={currentProvider.id === 'jimeng' && currentProvider.status === 'connected' ? '已启用默认 API，无需填写' : '输入 API Key'}
                 className="w-full h-11 pl-12 pr-12 text-sm bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-xl text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all"
               />
               <button
@@ -1011,7 +1011,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
             type={showFigmaToken ? 'text' : 'password'}
             value={figmaToken}
             onChange={(e) => setFigmaToken(e.target.value)}
-            placeholder="figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            placeholder=""
             className="w-full h-9 pl-8 pr-9 text-xs bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/30 font-mono"
             onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFigma() }}
           />

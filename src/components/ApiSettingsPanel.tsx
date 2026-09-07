@@ -178,8 +178,9 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
 
   const testConnection = async () => {
     setIsTestingConnection(true)
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    setArkConnected(true)
+    const status = await checkLoginStatus()
+    setArkConnected(status.ok)
+    setMessage({ ok: status.ok, text: status.credit || '暂时无法验证连接' })
     setIsTestingConnection(false)
   }
 
@@ -561,7 +562,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
                 variant="glass" 
                 size="sm" 
                 onClick={testConnection} 
-                disabled={isTestingConnection || !arkKey.trim()} 
+                disabled={isTestingConnection} 
                 className="w-full gap-1.5 mt-4"
               >
                 <RefreshCw size={12} className={isTestingConnection ? 'animate-spin' : ''} />
@@ -725,7 +726,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
                   type={showFigmaToken ? 'text' : 'password'}
                   value={figmaToken}
                   onChange={(e) => setFigmaToken(e.target.value)}
-                  placeholder="figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  placeholder=""
                   className="w-full h-9 pl-8 pr-9 text-xs bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/30 font-mono"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFigma() }}
                 />

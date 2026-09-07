@@ -23,8 +23,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   
   return {
-    base: './',
-    plugins: [react(), jimengServerPlugin(), removeModuleTypePlugin()],
+    base: mode === 'sites' ? '/' : './',
+    publicDir: mode === 'sites' ? false : 'public',
+    plugins: [react(), jimengServerPlugin(env), removeModuleTypePlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

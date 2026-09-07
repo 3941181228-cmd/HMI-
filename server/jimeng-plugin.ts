@@ -13,11 +13,11 @@ const TRIPO_API_BASE = 'https://openapi.tripo3d.com/v3'
 const TRIPO_DEFAULT_MODEL = 'v3.1-20260211'
 
 // In-memory API key storage (persists during dev session)
-let storedApiKey = process.env.ARK_API_KEY || 'ark-83c3387c-3a20-463b-a888-2aad7be0b97a-31c09'
+let storedApiKey = process.env.JIMENG_API_KEY || process.env.ARK_API_KEY || ''
 let storedOpenAIKey = process.env.OPENAI_API_KEY || ''
 let storedVisionEndpoint = 'ep-20260522095644-hdr5h'  // Endpoint ID for Ark vision model
 // Tripo API Key（用户提供的默认 token，可在运行时覆盖）
-let storedTripoKey = process.env.TRIPO_API_KEY || 'tsk_rsmyf6rFg2_TKEkcQjAKt0iuNMR0riNopdI_XWzmm2O'
+let storedTripoKey = process.env.TRIPO_API_KEY || ''
 
 function json(res: ServerResponse, status: number, data: unknown) {
   res.statusCode = status
@@ -81,7 +81,8 @@ async function callArkAPI(apiKey: string, requestBody: Record<string, unknown>):
   }
 }
 
-export function jimengServerPlugin(): Plugin {
+export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
+  storedApiKey = env.JIMENG_API_KEY || env.ARK_API_KEY || storedApiKey
   return {
     name: 'jimeng-server',
     configureServer(server: ViteDevServer) {
@@ -103,7 +104,7 @@ export function jimengServerPlugin(): Plugin {
           } else if (resp.status === 401 || resp.status === 403) {
             json(res, 200, { ok: false, credit: 'API Key 无效或已过期' })
           } else {
-            json(res, 200, { ok: true, credit: 'API Key 已配置（状态未知）' })
+            json(res, 200, { ok: false, credit: 'API Key 已配置，暂时无法验证连接' })
           }
         } catch {
           json(res, 200, { ok: false, credit: '无法连接至 Ark API，请检查网络' })
@@ -120,7 +121,7 @@ export function jimengServerPlugin(): Plugin {
         const body = await readBody(req)
         try {
           const data = JSON.parse(body)
-          const key = (data.api_key || '').trim()
+          const key = (data.api_key || '').trim() || storedApiKey
           if (!key) {
             json(res, 400, { error: 'api_key is required' })
             return
@@ -136,10 +137,10 @@ export function jimengServerPlugin(): Plugin {
             } else if (checkResp.status === 401 || checkResp.status === 403) {
               json(res, 200, { ok: false, message: 'API Key 无效或已过期，已保存但不可用' })
             } else {
-              json(res, 200, { ok: true, message: 'API Key 已保存（无法验证状态）' })
+              json(res, 200, { ok: false, message: 'API Key 已保存，暂时无法验证连接' })
             }
           } catch {
-            json(res, 200, { ok: true, message: 'API Key 已保存（无法连接至 Ark API）' })
+            json(res, 200, { ok: false, message: 'API Key 已保存，暂时无法连接至 Ark API' })
           }
         } catch {
           json(res, 400, { error: 'Invalid JSON' })
