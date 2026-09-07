@@ -13,6 +13,7 @@ import {
   Upload,
   X,
   ImagePlus,
+  Maximize2,
   Settings2,
   AlertCircle,
   FileText,
@@ -27,12 +28,17 @@ import {
   Monitor,
   ChevronDown,
   ArrowRightLeft,
+  Component,
+  Copy,
+  Check,
+  RefreshCw,
 } from 'lucide-react'
 
 const HMIPreview = lazy(() => import('./HMIPreview'))
 const CreationDashboard = lazy(() => import('./CreationDashboard'))
 const CheckPage = lazy(() => import('./CheckPage'))
 const ThemeSwapPanel = lazy(() => import('./ThemeSwapPanel'))
+const Tripo3DPanel = lazy(() => import('./Tripo3DPanel'))
 
 import { Button } from './ui/button'
 import CheckBadge, { checkItemsByCategory } from './CheckBadge'
@@ -41,27 +47,40 @@ import { themes, getThemeById } from '@/data/themeData'
 import { getProxyImageUrl } from '@/utils/imageProxy'
 import type { HMITheme } from '@/data/themeData'
 import { animeWallpapers, animeTags, natureWallpapers, natureTags, abstractWallpapers, abstractTags, cityWallpapers, cityTags, vehicleWallpapers, vehicleTags, animalWallpapers, animalTags, wallpaperCategories } from '@/data/wallpaperData'
+import { getStoredFigmaToken } from '@/services/apiStorage'
+import { fetchFigmaImageAsBlob, getProxiedFigmaImageUrl } from '@/services/figmaImageProxy'
+import {
+  checkAndVerifyImage, adjustImageToSize,
+  type CheckAndVerifyResult, type PresetSize,
+} from '@/services/imageSizeChecker'
+import { useSystemSettings } from '@/contexts/SystemSettingsContext'
+import { FigmaImage } from './FigmaImage'
+import {
+  processAIResult,
+  downloadSVGComponent,
+  downloadAllSVGComponents,
+  getCategoryColor,
+  copySVGCode,
+  type SVGComponent,
+  type CanvasInfo,
+  type SVGGenerationResult,
+} from '@/services/svgComponentGenerator'
 
-type TabId = 'dashboard' | 'preview' | 'generate' | 'edit' | 'theme' | 'check' | 'export' | 'wallpaper' | 'ai-wallpaper'
-
-interface EditComponent {
-  id?: string
-  type?: string
-  label?: string
-  bounds?: { x: number; y: number; width: number; height: number }
-  styles?: Record<string, unknown>
-}
+type TabId = 'dashboard' | 'preview' | 'generate' | 'edit' | 'theme' | 'check' | 'export' | 'wallpaper' | 'ai-wallpaper' | '3d-model'
 
 interface EditRegion {
   name?: string
   texts?: Array<{ type: string; content: string; description?: string }>
 }
 
-interface EditResult {
-  components?: EditComponent[]
+interface TextExtractResult {
   regions?: EditRegion[]
   summary?: string
 }
+
+interface EditSVGResult extends SVGGenerationResult {}
+
+type EditResultType = TextExtractResult | EditSVGResult
 
 const FRAME_PRESETS: Record<string, string[]> = {
   'SK85国内热区划定': [
@@ -138,7 +157,7 @@ interface WorkspaceProps {
   onTabChange?: (tab: TabId) => void
   onAddHistory?: (prompt: string, images: string[], category?: 'hmi' | 'wallpaper' | 'theme' | 'other') => void
   onDeleteRecords?: (ids: string[]) => void
-  editSubModeProp?: 'png2edit' | 'text_extract'
+  editSubModeProp?: 'png2svg' | 'text_extract'
   themePresetProp?: string | null
   wallpaperSubProp?: string | null
   onNavigate?: (target: string) => void
@@ -148,6 +167,7 @@ interface WorkspaceProps {
 export default function Workspace({ activeTab = 'dashboard', activeSection = 'full', onTabChange, onAddHistory, onDeleteRecords, editSubModeProp, themePresetProp, wallpaperSubProp, onNavigate, historyRecords = [] }: WorkspaceProps) {
   const navigate = useNavigate()
   const { isLoggedIn } = useAuth()
+  const { notify } = useSystemSettings()
   const [promptInput, setPromptInput] = useState('')
 
   const [isGenerating, setIsGenerating] = useState(false)
@@ -155,10 +175,71 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const [refImageName, setRefImageName] = useState('')
   const [generatedImages, setGeneratedImages] = useState<string[]>([])
   const [genError, setGenError] = useState<string | null>(null)
+  // AI 生成尺寸校验结果（key 为原始图片 URL）
+  const [sizeVerifyResults, setSizeVerifyResults] = useState<Record<string, CheckAndVerifyResult | undefined>>({})
+  const [isVerifyingSize, setIsVerifyingSize] = useState(false)
   const [wallpaperPrompt, setWallpaperPrompt] = useState('')
   const [wallpaperGenerating, setWallpaperGenerating] = useState(false)
   const [wallpaperResults, setWallpaperResults] = useState<string[]>([])
   const [wallpaperError, setWallpaperError] = useState<string | null>(null)
+
+  // 即梦 Seedream API 支持的精确尺寸（2K 档位，平衡清晰度与速度）
+  // 传给 API 的 size 必须是这些值之一，否则 API 会忽略并回退默认
+  const JIMENG_SUPPORTED_SIZES: Record<string, { w: number; h: number; apiSize: string }> = {
+    '1:1':  { w: 2048, h: 2048, apiSize: '2048x2048' },
+    '16:9': { w: 2560, h: 1440, apiSize: '2560x1440' },
+    '9:16': { w: 1440, h: 2560, apiSize: '1440x2560' },
+    '4:3':  { w: 2304, h: 1728, apiSize: '2304x1728' },
+    '3:4':  { w: 1728, h: 2304, apiSize: '1728x2304' },
+    '3:2':  { w: 2496, h: 1664, apiSize: '2496x1664' },
+    '2:3':  { w: 1664, h: 2496, apiSize: '1664x2496' },
+    '21:9': { w: 3024, h: 1296, apiSize: '3024x1296' },
+  }
+
+  // 根据当前尺寸选择器状态构造 PresetSize（用于 API 请求和校验）
+  // 关键：传给即梦 API 的必须是官方支持的精确像素值，否则会被忽略
+  const buildPresetSizeFromSelection = (): PresetSize => {
+    if (genCustomSize) {
+      // 自定义尺寸：直接用用户输入的值（注意：非 API 推荐值可能被 API 忽略）
+      const orientation = genCustomWidth > genCustomHeight ? 'landscape' : genCustomWidth < genCustomHeight ? 'portrait' : 'square'
+      return {
+        id: 'custom',
+        label: '自定义',
+        ratio: `${genCustomWidth}:${genCustomHeight}`,
+        apiSize: `${genCustomWidth}x${genCustomHeight}`,
+        width: genCustomWidth,
+        height: genCustomHeight,
+        orientation,
+      }
+    }
+    // 预设比例：映射到即梦 API 支持的精确尺寸（2K 档位）
+    // 忽略用户选的具体分辨率（如 1920×1080），统一用 API 推荐值
+    const supported = JIMENG_SUPPORTED_SIZES[genRatio]
+    if (supported) {
+      const orientation = supported.w > supported.h ? 'landscape' : supported.w < supported.h ? 'portrait' : 'square'
+      return {
+        id: genRatio,
+        label: genRatio,
+        ratio: genRatio,
+        apiSize: supported.apiSize,
+        width: supported.w,
+        height: supported.h,
+        orientation,
+      }
+    }
+    // 兜底：解析 "1920×1080" → "1920x1080"（可能不被 API 支持）
+    const [w, h] = genResolution.replace('×', 'x').split('x').map(Number)
+    const orientation = w > h ? 'landscape' : w < h ? 'portrait' : 'square'
+    return {
+      id: genRatio,
+      label: genRatio,
+      ratio: genRatio,
+      apiSize: `${w}x${h}`,
+      width: w,
+      height: h,
+      orientation,
+    }
+  }
   const [wallpaperRes, setWallpaperRes] = useState('1920×1080')
   const WALLPAPER_RESOLUTIONS = [
     { label: '1920×1080 (Full HD)', w: 1920, h: 1080, ratio: '16:9' },
@@ -175,24 +256,36 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const [genCustomWidth, setGenCustomWidth] = useState(1920)
   const [genCustomHeight, setGenCustomHeight] = useState(1080)
   const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false)
-  const [editSubMode, setEditSubMode] = useState<'png2edit' | 'text_extract'>('png2edit')
+  const [editSubMode, setEditSubMode] = useState<'png2svg' | 'text_extract'>('png2svg')
   const [editImage, setEditImage] = useState<string | null>(null)
   const [editImageName, setEditImageName] = useState('')
   const [editAnalyzing, setEditAnalyzing] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
-  const [editResult, setEditResult] = useState<EditResult | null>(null)
+  const [editResult, setEditResult] = useState<EditResultType | null>(null)
   const editFileRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
   // Export state
-  const [exportQueue, setExportQueue] = useState<{ id: string; type: string; status: 'waiting' | 'processing' | 'completed' | 'failed'; progress: number; filename: string; size?: string }[]>([])
+  const [exportQueue, setExportQueue] = useState<{ id: string; type: string; status: 'waiting' | 'processing' | 'completed' | 'failed'; progress: number; filename: string; size?: string; frameName?: string }[]>([])
   const [isExporting, setIsExporting] = useState(false)
   const [exportComplete, setExportComplete] = useState(false)
   const [completedExport, setCompletedExport] = useState<{ type: string; filename: string; size: string; resolution?: string } | null>(null)
+
+  // PNG 导出默认配置（固定：2x 分辨率、PNG 无损、保留透明度）
+  const PNG_EXPORT_DEFAULTS = {
+    scale: 2 as const,
+    quality: 'lossless' as const,
+    outputFormat: 'png' as const,
+    keepTransparency: true,
+  }
+  // 整体进度（用于显示当前导出第几张、当前帧名）
+  const [exportOverallProgress, setExportOverallProgress] = useState<{ current: number; total: number; currentFrame?: string; phase: 'idle' | 'fetching' | 'encoding' | 'zipping' | 'saving' | 'done' } | null>(null)
+  // 导出错误提示
+  const [exportErrorMessage, setExportErrorMessage] = useState<string | null>(null)
   
-  // Figma API Configuration
-  const FIGMA_API_TOKEN = 'figd_wxgzK5DKkvwd8RjL1jEqXPflDkuCr_UUBq5YNxCR'
-  const FIGMA_API_BASE_URL = 'https://api.figma.com/v1'
+  // Figma API Configuration - 使用用户在设置中配置的 Token
+  const FIGMA_API_TOKEN = getStoredFigmaToken()
+  const FIGMA_API_BASE_URL = '/api/figma'  // 通过 Vite 代理访问 Figma API
 
   // Figma import state
   const [figmaUrl, setFigmaUrl] = useState('')
@@ -205,6 +298,15 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const [analyzingStatus, setAnalyzingStatus] = useState<string>('')
   const [framePreviews, setFramePreviews] = useState<Record<string, string>>({})
   const [frameNodeIds, setFrameNodeIds] = useState<Record<string, string>>({})
+  // Figma切图资源状态
+  const [figmaPreviewMode, setFigmaPreviewMode] = useState<'frames' | 'assets'>('frames')
+  const [figmaExportAssets, setFigmaExportAssets] = useState<Array<{ id: string; name: string; url: string; format: string }>>([])
+  const [assetsLoading, setAssetsLoading] = useState(false)
+  // 预览图加载状态跟踪
+  const [previewsLoading, setPreviewsLoading] = useState(false)
+  const [previewErrors, setPreviewErrors] = useState<Record<string, boolean>>({})
+  // 切图加载状态跟踪
+  const [assetErrors, setAssetErrors] = useState<Record<string, boolean>>({})
   
   // Parse Figma URL to extract file key and generate frames
   const parseFigmaUrl = (url: string): { fileKey: string | null; fileName: string; frames: string[] } => {
@@ -257,9 +359,22 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const connectFigma = async () => {
     if (!figmaUrl.trim()) return
     
+    // 每次调用时重新获取最新的token
+    const currentToken = getStoredFigmaToken()
+    if (!currentToken) {
+      alert('请先在设置中配置 Figma Personal Access Token')
+      setIsConnecting(false)
+      return
+    }
+    
     setIsConnecting(true)
     setAnalyzingStep(0)
     setAnalyzingStatus('读取文件...')
+    // 重置切图状态
+    setFigmaExportAssets([])
+    setAssetsLoading(false)
+    setAssetErrors({})
+    setFigmaPreviewMode('frames')
     
     // Step 1: Parse Figma URL
     const { fileKey, fileName } = parseFigmaUrl(figmaUrl)
@@ -278,7 +393,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       // Step 2: Call Figma API to get file data
       const response = await fetch(`${FIGMA_API_BASE_URL}/files/${fileKey}`, {
         headers: {
-          'X-Figma-Token': FIGMA_API_TOKEN
+          'X-Figma-Token': currentToken
         }
       })
       
@@ -288,28 +403,69 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       
       const data = await response.json()
       
-      // Step 3: Extract Top Level Frames
+      // Step 3: Extract Top Level Frames (only outermost frames, no nested frames)
+      // 以 nodeId 为唯一标识，同名 Frame 自动加序号 (2)、(3) ...
       const frames: string[] = []
       const nodeIds: Record<string, string> = {}
-      
-      // Helper function to recursively find frames
-      const findFrames = (nodes: any[], parentName: string = '') => {
-        for (const node of nodes) {
-          if (node.type === 'FRAME') {
-            const frameName = parentName ? `${parentName}/${node.name}` : node.name
-            frames.push(frameName)
-            nodeIds[frameName] = node.id
-          }
-          if (node.children) {
-            findFrames(node.children, parentName ? `${parentName}/${node.name}` : node.name)
+      const nameCount: Record<string, number> = {}  // 记录每个原始名出现的次数
+
+      // Only find top-level frames (direct children of CANVAS), don't recurse into frames
+      for (const page of data.document.children) {
+        if (page.type === 'CANVAS' && page.children) {
+          for (const node of page.children) {
+            if (node.type === 'FRAME') {
+              const realName = node.name || '未命名 Frame'
+              // 同名 Frame 加序号区分，确保唯一
+              nameCount[realName] = (nameCount[realName] || 0) + 1
+              const displayName = nameCount[realName] > 1
+                ? `${realName} (${nameCount[realName]})`
+                : realName
+              frames.push(displayName)
+              nodeIds[displayName] = node.id  // displayName 唯一，不会覆盖
+            }
           }
         }
       }
       
-      // Get frames from all pages
+      // 递归查找所有带有PNG导出设置的节点（切图）
+      const findExportableNodes = (node: any, parentPath: string = ''): Array<{ id: string; name: string; format: string }> => {
+        const results: Array<{ id: string; name: string; format: string }> = []
+        const currentPath = parentPath ? `${parentPath}/${node.name || '未命名'}` : (node.name || '未命名')
+        
+        if (node.exportSettings && Array.isArray(node.exportSettings)) {
+          const pngSetting = node.exportSettings.find((s: any) => s.format === 'PNG')
+          if (pngSetting) {
+            results.push({
+              id: node.id,
+              name: currentPath,
+              format: 'PNG'
+            })
+          }
+          // 也支持SVG格式
+          const svgSetting = node.exportSettings.find((s: any) => s.format === 'SVG')
+          if (svgSetting) {
+            results.push({
+              id: node.id,
+              name: currentPath,
+              format: 'SVG'
+            })
+          }
+        }
+        
+        if (node.children && Array.isArray(node.children)) {
+          for (const child of node.children) {
+            results.push(...findExportableNodes(child, currentPath))
+          }
+        }
+        
+        return results
+      }
+      
+      // 识别所有切图节点
+      const exportableNodes: Array<{ id: string; name: string; format: string }> = []
       for (const page of data.document.children) {
-        if (page.type === 'CANVAS' && page.children) {
-          findFrames(page.children)
+        if (page.type === 'CANVAS') {
+          exportableNodes.push(...findExportableNodes(page))
         }
       }
       
@@ -343,21 +499,21 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       setAnalyzingStatus('')
       
       // 异步加载预览图（不在连接流程中等待）
-      if (frames.length > 0 && frames.length <= 50) {
+      if (frames.length > 0) {
         loadFramePreviewsAsync(fileKey, frames, nodeIds)
+      }
+      
+      // 延迟加载切图，避免与预览图同时加载导致网络拥堵
+      if (exportableNodes.length > 0 && exportableNodes.length <= 200) {
+        setTimeout(() => loadExportAssetsAsync(fileKey, exportableNodes), 2000)
       }
       
     } catch (error) {
       console.error('Figma API error:', error)
-      // Fallback to simulated frames if API fails
+      // API失败时不生成静态死图，显示错误状态
       const { frames } = parseFigmaUrl(figmaUrl)
-      const previews: Record<string, string> = {}
-      for (const frame of frames) {
-        previews[frame] = generateFramePreview(frame)
-      }
-      setFigmaFrames(frames)
-      setFramePreviews(previews)
-      setSelectedFrames([...new Set(frames)])
+      setFigmaFrames(frames.length > 0 ? frames : DEFAULT_FRAMES)
+      setSelectedFrames([...new Set(frames.length > 0 ? frames : DEFAULT_FRAMES)])
       setFigmaFileInfo({
         name: `${fileName}.fig`,
         page: '主页面',
@@ -368,41 +524,141 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       setIsConnecting(false)
       setAnalyzingStep(-1)
       setAnalyzingStatus('')
+      // 不生成静态预览图，framePreviews保持为空，UI会显示加载/错误状态
     }
   }
   
-  // 异步加载预览图
+  // 异步加载预览图（渐进式加载，逐帧更新）
   const loadFramePreviewsAsync = async (fileKey: string, frames: string[], nodeIds: Record<string, string>) => {
-    const previews: Record<string, string> = {}
-    const batchSize = 50
-    
+    const token = getStoredFigmaToken()
+    if (!token) {
+      console.warn('Figma Token未配置，无法加载预览图')
+      return
+    }
+
+    // 前置诊断：检查 nodeIds 是否完整
+    const missingNodeIds = frames.filter(f => !nodeIds[f])
+    if (missingNodeIds.length > 0) {
+      console.error('预览加载失败：以下 Frame 缺少 nodeId（可能数据未完整加载）:', missingNodeIds)
+    }
+
+    console.log('开始加载预览图:', { fileKey, frameCount: frames.length, token: token.slice(0, 8) + '...' })
+
+    setPreviewsLoading(true)
+    setPreviewErrors({})
+    const batchSize = 5  // 小批量加载，快速显示前几张
+
     for (let i = 0; i < frames.length; i += batchSize) {
       const batchFrames = frames.slice(i, i + batchSize)
-      const nodeIdList = batchFrames.map(f => nodeIds[f]).join(',')
-      
+      // 过滤掉没有 nodeId 的 Frame，避免把 undefined 拼到 URL 中
+      const validFrames = batchFrames.filter(f => nodeIds[f])
+      if (validFrames.length === 0) {
+        console.warn(`批次 ${i}-${i + batchSize} 全部缺少 nodeId，跳过`)
+        batchFrames.forEach(f => setPreviewErrors(prev => ({ ...prev, [f]: true })))
+        continue
+      }
+      const nodeIdList = validFrames.map(f => nodeIds[f]).join(',')
+
       try {
-        const imageResponse = await fetch(`${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${nodeIdList}&format=png&scale=1`, {
+        // scale=1 预览足够清晰，生成速度快3-5倍
+        const apiUrl = `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${nodeIdList}&format=png&scale=1`
+        console.log(`预览图请求 [批次 ${i / batchSize + 1}]:`, apiUrl)
+        const imageResponse = await fetch(apiUrl, {
           headers: {
-            'X-Figma-Token': FIGMA_API_TOKEN
+            'X-Figma-Token': token
           }
         })
-        
+
         if (imageResponse.ok) {
           const imageData = await imageResponse.json()
+          console.log(`Figma 返回的图片数据 [批次 ${i / batchSize + 1}]:`, imageData)
+          // 逐帧更新UI，用户能立即看到已加载的预览
           for (const frameName of batchFrames) {
             const nodeId = nodeIds[frameName]
-            if (imageData.images[nodeId] && imageData.images[nodeId] !== 'null') {
-              previews[frameName] = imageData.images[nodeId]
+            if (!nodeId) {
+              console.warn(`Frame "${frameName}" 缺少 nodeId，跳过`)
+              setPreviewErrors(prev => ({ ...prev, [frameName]: true }))
+              continue
+            }
+            const rawUrl = imageData.images?.[nodeId]
+            if (rawUrl && rawUrl !== 'null') {
+              console.log(`Frame "${frameName}" 预览图 URL:`, rawUrl.slice(0, 80) + '...')
+              // 存储原始S3 URL，由FigmaImage组件处理代理
+              setFramePreviews(prev => ({ ...prev, [frameName]: rawUrl }))
+            } else {
+              console.warn(`Frame "${frameName}" 的图片 URL 为空，Figma 返回:`, imageData)
+              setPreviewErrors(prev => ({ ...prev, [frameName]: true }))
             }
           }
-          // 更新预览图（增量更新）
-          setFramePreviews(prev => ({ ...prev, ...previews }))
+        } else {
+          const errText = await imageResponse.text().catch(() => '')
+          console.error(`Figma API返回错误: HTTP ${imageResponse.status}`, errText)
+          batchFrames.forEach(f => setPreviewErrors(prev => ({ ...prev, [f]: true })))
         }
       } catch (error) {
-        console.warn('Failed to fetch frame previews:', error)
+        console.error(`预览图加载异常 [批次 ${i / batchSize + 1}]:`, error)
+        batchFrames.forEach(f => setPreviewErrors(prev => ({ ...prev, [f]: true })))
       }
     }
-    console.log(`Successfully loaded ${Object.keys(previews).length}/${frames.length} frame previews`)
+    setPreviewsLoading(false)
+    console.log('预览图加载完成')
+  }
+  
+  // 异步加载切图URL
+  const loadExportAssetsAsync = async (fileKey: string, exportNodes: Array<{ id: string; name: string; format: string }>) => {
+    setAssetsLoading(true)
+    const token = getStoredFigmaToken()
+    if (!token) {
+      console.warn('Figma Token未配置，无法加载切图')
+      setAssetsLoading(false)
+      return
+    }
+    
+    const assets: Array<{ id: string; name: string; url: string; format: string }> = []
+    const batchSize = 50
+    
+    // 按格式分组处理
+    const pngNodes = exportNodes.filter(n => n.format === 'PNG')
+    const svgNodes = exportNodes.filter(n => n.format === 'SVG')
+    
+    const loadBatch = async (nodes: Array<{ id: string; name: string; format: string }>, format: string, scale: number = 2) => {
+      for (let i = 0; i < nodes.length; i += batchSize) {
+        const batch = nodes.slice(i, i + batchSize)
+        const nodeIdList = batch.map(n => n.id).join(',')
+        
+        try {
+          const imageResponse = await fetch(`${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${nodeIdList}&format=${format.toLowerCase()}&scale=${scale}`, {
+            headers: {
+              'X-Figma-Token': token
+            }
+          })
+          
+          if (imageResponse.ok) {
+            const imageData = await imageResponse.json()
+            for (const node of batch) {
+              const imageUrl = imageData.images?.[node.id]
+              if (imageUrl && imageUrl !== 'null') {
+                assets.push({
+                  id: node.id,
+                  name: node.name,
+                  url: imageUrl,
+                  format: node.format
+                })
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`Failed to fetch ${format} assets:`, error)
+        }
+      }
+    }
+    
+    await loadBatch(pngNodes, 'PNG', 2)
+    await loadBatch(svgNodes, 'SVG', 1)
+    
+    setFigmaExportAssets(assets)
+    setAssetsLoading(false)
+    console.log(`Successfully loaded ${assets.length}/${exportNodes.length} export assets`)
   }
   
   // Generate default frames when API is not available
@@ -464,6 +720,133 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     return canvas.toDataURL('image/png')
   }
   
+  // 刷新预览图
+  const refreshFramePreviews = () => {
+    if (figmaFileInfo?.fileKey && Object.keys(frameNodeIds).length > 0) {
+      setFramePreviews({})
+      setPreviewErrors({})
+      loadFramePreviewsAsync(figmaFileInfo.fileKey, figmaFrames, frameNodeIds)
+    }
+  }
+  
+  // 重试单个frame的预览图
+  const retryFramePreview = (frameName: string) => {
+    const fileKey = figmaFileInfo?.fileKey
+    const nodeId = frameNodeIds[frameName]
+    if (!fileKey || !nodeId) return
+    
+    const token = getStoredFigmaToken()
+    if (!token) return
+    
+    // 清除该frame的错误状态
+    setPreviewErrors(prev => {
+      const next = { ...prev }
+      delete next[frameName]
+      return next
+    })
+    
+    fetch(`${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${nodeId}&format=png&scale=1`, {
+      headers: { 'X-Figma-Token': token }
+    })
+      .then(res => res.json())
+      .then(data => {
+        const rawUrl = data.images?.[nodeId]
+        if (rawUrl && rawUrl !== 'null') {
+          setFramePreviews(prev => ({ ...prev, [frameName]: rawUrl }))
+        } else {
+          setPreviewErrors(prev => ({ ...prev, [frameName]: true }))
+        }
+      })
+      .catch(err => {
+        console.warn(`重试预览图失败 [${frameName}]:`, err)
+        setPreviewErrors(prev => ({ ...prev, [frameName]: true }))
+      })
+  }
+  
+  // 刷新切图
+  const refreshExportAssets = () => {
+    if (figmaFileInfo?.fileKey && figmaConnected) {
+      const token = getStoredFigmaToken()
+      if (!token) return
+      
+      // 重新扫描切图节点并加载
+      setFigmaExportAssets([])
+      setAssetErrors({})
+      
+      // 从Figma重新获取文件数据以识别切图节点
+      fetch(`${FIGMA_API_BASE_URL}/files/${figmaFileInfo.fileKey}`, {
+        headers: { 'X-Figma-Token': token }
+      })
+        .then(res => res.json())
+        .then(data => {
+          const findExportableNodes = (node: any, parentPath: string = ''): Array<{ id: string; name: string; format: string }> => {
+            const results: Array<{ id: string; name: string; format: string }> = []
+            const currentPath = parentPath ? `${parentPath}/${node.name || '未命名'}` : (node.name || '未命名')
+            if (node.exportSettings && Array.isArray(node.exportSettings)) {
+              const pngSetting = node.exportSettings.find((s: any) => s.format === 'PNG')
+              if (pngSetting) results.push({ id: node.id, name: currentPath, format: 'PNG' })
+              const svgSetting = node.exportSettings.find((s: any) => s.format === 'SVG')
+              if (svgSetting) results.push({ id: node.id, name: currentPath, format: 'SVG' })
+            }
+            if (node.children && Array.isArray(node.children)) {
+              for (const child of node.children) results.push(...findExportableNodes(child, currentPath))
+            }
+            return results
+          }
+          
+          const exportableNodes: Array<{ id: string; name: string; format: string }> = []
+          for (const page of data.document.children) {
+            if (page.type === 'CANVAS') exportableNodes.push(...findExportableNodes(page))
+          }
+          
+          if (exportableNodes.length > 0 && exportableNodes.length <= 200) {
+            loadExportAssetsAsync(figmaFileInfo.fileKey, exportableNodes)
+          }
+        })
+        .catch(err => console.warn('刷新切图失败:', err))
+    }
+  }
+  
+  // 重试单个切图
+  const retryExportAsset = (assetId: string) => {
+    const fileKey = figmaFileInfo?.fileKey
+    const asset = figmaExportAssets.find(a => a.id === assetId)
+    if (!fileKey || !asset) return
+    
+    const token = getStoredFigmaToken()
+    if (!token) return
+    
+    // 清除错误状态
+    setAssetErrors(prev => {
+      const next = { ...prev }
+      delete next[assetId]
+      return next
+    })
+    
+    const format = asset.format.toLowerCase()
+    const scale = format === 'png' ? 2 : 1
+    
+    fetch(`${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${assetId}&format=${format}&scale=${scale}`, {
+      headers: { 'X-Figma-Token': token }
+    })
+      .then(res => res.json())
+      .then(data => {
+        const rawUrl = data.images?.[assetId]
+        if (rawUrl && rawUrl !== 'null') {
+          // 更新该切图的URL
+          setFigmaExportAssets(prev => prev.map(a => 
+            a.id === assetId ? { ...a, url: rawUrl } : a
+          ))
+        } else {
+          setAssetErrors(prev => ({ ...prev, [assetId]: true }))
+        }
+      })
+      .catch(err => {
+        console.warn(`重试切图失败 [${asset.name}]:`, err)
+        setAssetErrors(prev => ({ ...prev, [assetId]: true }))
+      })
+  }
+  
   const disconnectFigma = () => {
     setFigmaUrl('')
     setFigmaConnected(false)
@@ -490,16 +873,352 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     setSelectedFrames([])
   }
   
+  // 根据压缩质量配置计算 canvas 重编码参数
+  const getQualityConfig = (quality: 'lossless' | 'high' | 'medium' | 'low') => {
+    switch (quality) {
+      case 'lossless': return { mime: 'image/png', quality: 1 }
+      case 'high': return { mime: 'image/jpeg', quality: 0.92 }
+      case 'medium': return { mime: 'image/jpeg', quality: 0.75 }
+      case 'low': return { mime: 'image/jpeg', quality: 0.55 }
+    }
+  }
+
+  // 通过 canvas 重编码图片以应用压缩质量（PNG 无损 / JPG 体积压缩）
+  // 同时保留原始 PNG 的透明通道（仅当输出为 PNG 时）
+  const reencodeImage = async (sourceBlob: Blob, quality: 'lossless' | 'high' | 'medium' | 'low', keepTransparency: boolean): Promise<Blob> => {
+    const cfg = getQualityConfig(quality)
+    // 无损 PNG 或体积优化失败时直接返回原数据
+    if (quality === 'lossless') return sourceBlob
+
+    // JPG 不保留透明度，需绘制白底
+    return new Promise((resolve) => {
+      const img = new Image()
+      const objectUrl = URL.createObjectURL(sourceBlob)
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            URL.revokeObjectURL(objectUrl)
+            resolve(sourceBlob)
+            return
+          }
+          // JPG 无透明通道，绘制白底
+          if (cfg.mime === 'image/jpeg' || !keepTransparency) {
+            ctx.fillStyle = '#ffffff'
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+          }
+          ctx.drawImage(img, 0, 0)
+          canvas.toBlob(
+            (blob) => {
+              URL.revokeObjectURL(objectUrl)
+              resolve(blob || sourceBlob)
+            },
+            cfg.mime,
+            cfg.quality
+          )
+        } catch {
+          URL.revokeObjectURL(objectUrl)
+          resolve(sourceBlob)
+        }
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl)
+        resolve(sourceBlob)
+      }
+      img.src = objectUrl
+    })
+  }
+
+  // PNG 导出函数：使用默认配置（2x、PNG 无损、保留透明度），直接打包 ZIP 下载
+  const handlePngExport = async () => {
+    if (isExporting) return
+
+    // 1. 校验
+    if (selectedFrames.length === 0) {
+      setExportErrorMessage('请先在左侧「已识别的 Frame」列表中勾选至少一个 Frame 再导出。')
+      return
+    }
+    if (!figmaConnected) {
+      setExportErrorMessage('Figma 尚未连接，请先在「Figma 导入」区域粘贴链接并连接。')
+      return
+    }
+    const fileKey = figmaFileInfo?.fileKey
+    if (!fileKey) {
+      setExportErrorMessage('Figma 文件信息缺失，请重新连接以获取 fileKey。')
+      return
+    }
+    const missingNodeIds = selectedFrames.filter(name => !frameNodeIds[name])
+    if (missingNodeIds.length > 0) {
+      setExportErrorMessage(`以下 Frame 缺少节点 ID，可能数据未完整加载：${missingNodeIds.join('、')}。请重新连接 Figma 后再试。`)
+      return
+    }
+    const currentToken = getStoredFigmaToken()
+    if (!currentToken) {
+      setExportErrorMessage('Figma Token 未配置或权限不足，请在设置中添加具有「File content」读取权限的 Personal Access Token。')
+      return
+    }
+
+    // 2. 准备配置参数（使用默认配置）
+    const { scale, quality, outputFormat, keepTransparency } = PNG_EXPORT_DEFAULTS
+    const projectName = (figmaFileInfo?.name?.replace('.fig', '') || 'HMI Export').trim() || 'HMI Export'
+    const ext = outputFormat === 'png' ? 'png' : 'jpg'
+
+    // 3. 初始化导出队列
+    setExportErrorMessage(null)
+    setExportOverallProgress({ current: 0, total: selectedFrames.length, phase: 'fetching' })
+
+    const newItems = selectedFrames.map((frameName, index) => ({
+      id: `export-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 11)}`,
+      type: 'PNG 导出',
+      frameName,
+      status: 'waiting' as const,
+      progress: 0,
+      filename: `${frameName}.${ext}`,
+    }))
+
+    setExportQueue(prev => [...prev, ...newItems])
+    setIsExporting(true)
+
+    // 收集所有成功导出的文件（用于打包 ZIP）
+    // 使用 Set 对文件名做唯一性去重，避免安全化后同名文件互相覆盖
+    const collectedFiles: Array<{ filename: string; blob: Blob }> = []
+    const usedFilenames = new Set<string>()  // 已使用的文件名（用于检测冲突）
+    const failedItems: string[] = []
+    // 并发锁：浏览器对同域名并发连接限制为 6，设为 5 留 1 个余量
+    const CONCURRENCY = 5
+    let completedCount = 0
+
+    // === 优化 1: 批量请求 Figma API ===
+    // Figma API 支持一次请求多个 nodeId，大幅减少 API 调用次数
+    // 34 个 Frame 从 34 次 API 请求 → 1 次批量请求
+    const FIGMA_BATCH_SIZE = 50  // Figma API 单次请求最大节点数
+    const imageUrlMap: Record<string, string> = {}  // nodeId → imageUrl
+
+    setExportOverallProgress({
+      current: 0,
+      total: selectedFrames.length,
+      currentFrame: '正在批量获取图片地址...',
+      phase: 'fetching'
+    })
+
+    for (let i = 0; i < selectedFrames.length; i += FIGMA_BATCH_SIZE) {
+      const batchFrames = selectedFrames.slice(i, i + FIGMA_BATCH_SIZE)
+      const batchNodeIds = batchFrames.map(name => frameNodeIds[name]).filter(Boolean)
+      if (batchNodeIds.length === 0) continue
+
+      const idsParam = batchNodeIds.join(',')
+      const apiUrl = `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=${scale}`
+
+      try {
+        const apiController = new AbortController()
+        const apiTimer = setTimeout(() => apiController.abort(new Error('Figma API 批量请求超时（30s）')), 30000)
+        const response = await fetch(apiUrl, {
+          headers: { 'X-Figma-Token': currentToken },
+          signal: apiController.signal,
+        })
+        clearTimeout(apiTimer)
+
+        if (!response.ok) {
+          const statusText = response.status === 403 ? '（Token 权限不足或已过期）'
+            : response.status === 404 ? '（fileKey 错误或节点已删除）'
+            : response.status === 429 ? '（请求过于频繁，已被限流）'
+            : ''
+          throw new Error(`Figma API 返回 HTTP ${response.status}${statusText}`)
+        }
+
+        const data = await response.json()
+        if (data.err) throw new Error(`Figma 处理失败：${data.err}`)
+
+        // 合并到 imageUrlMap
+        for (const [nodeId, url] of Object.entries(data.images || {})) {
+          if (url && url !== 'null') {
+            imageUrlMap[nodeId] = url as string
+          }
+        }
+
+        console.log(`[导出] 批量 API 请求 ${Math.floor(i / FIGMA_BATCH_SIZE) + 1}/${Math.ceil(selectedFrames.length / FIGMA_BATCH_SIZE)}: 获取 ${batchNodeIds.length} 个节点，成功 ${Object.keys(data.images || {}).length} 个`)
+      } catch (err: any) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.error(`[导出] 批量 API 请求失败:`, reason)
+        // 批量失败时，把这一批全部标记为失败
+        for (const frameName of batchFrames) {
+          failedItems.push(`${frameName}（${reason}）`)
+        }
+      }
+    }
+
+    // 更新进度：API 阶段完成
+    setExportOverallProgress({
+      current: 0,
+      total: selectedFrames.length,
+      currentFrame: '开始下载图片...',
+      phase: 'fetching'
+    })
+
+    /**
+     * 处理单个 Frame 的下载任务
+     * 由于 API 已批量预取，这里只需下载图片 + 重编码
+     */
+    const processItem = async (item: typeof newItems[number]) => {
+      const frameName = item.frameName || ''
+      const nodeId = frameNodeIds[frameName]
+
+      // 更新单个任务状态为处理中
+      setExportQueue(prev =>
+        prev.map(q => q.id === item.id ? { ...q, status: 'processing' as const, progress: 20 } : q)
+      )
+
+      let blob: Blob | null = null
+      try {
+        // 阶段 1: 从批量预取的结果中获取图片 URL
+        const imageUrl = imageUrlMap[nodeId]
+        if (!imageUrl) {
+          throw new Error('该 Frame 未在批量 API 请求中获取到图片 URL（可能节点不支持导出）')
+        }
+
+        setExportQueue(prev =>
+          prev.map(q => q.id === item.id ? { ...q, progress: 40 } : q)
+        )
+
+        // 阶段 2: 通过代理下载图片为 Blob（带超时和重试）
+        let rawBlob: Blob
+        try {
+          rawBlob = await fetchFigmaImageAsBlob(imageUrl)
+        } catch (dlErr: any) {
+          throw new Error(`图片下载失败：${dlErr?.message || '所有代理均无法访问 S3'}（图片 URL: ${imageUrl.slice(0, 80)}...）`)
+        }
+
+        if (!rawBlob || rawBlob.size === 0) {
+          throw new Error('下载的图片数据为空（0 字节）')
+        }
+
+        // 阶段 3: 按用户配置重编码（无损 PNG 或 JPG 压缩）
+        if (quality === 'lossless' || outputFormat === 'png') {
+          blob = rawBlob
+        } else {
+          try {
+            blob = await reencodeImage(rawBlob, quality, keepTransparency)
+          } catch (encErr: any) {
+            console.warn('JPG 重编码失败，回退到原始 PNG 数据:', encErr)
+            blob = rawBlob
+          }
+        }
+
+        setExportQueue(prev =>
+          prev.map(q => q.id === item.id ? { ...q, progress: 90 } : q)
+        )
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.error(`导出 Frame "${frameName}" 失败:`, reason, { nodeId, fileKey })
+        failedItems.push(`${frameName}（${reason}）`)
+        setExportQueue(prev =>
+          prev.map(q => q.id === item.id ? { ...q, status: 'failed' as const, progress: 100 } : q)
+        )
+        // 更新整体进度
+        completedCount++
+        setExportOverallProgress({ current: completedCount, total: newItems.length, currentFrame: frameName, phase: 'fetching' })
+        return
+      }
+
+      if (blob) {
+        // 文件名安全化：去除 Windows/macOS 非法字符
+        const rawName = item.filename.replace(/[\\/:*?"<>|]/g, '_').trim()
+        // 检测文件名冲突：对冲突文件名自动加序号 (2)、(3) ...
+        let finalName = rawName
+        if (usedFilenames.has(finalName)) {
+          const dotIdx = rawName.lastIndexOf('.')
+          const baseName = dotIdx > 0 ? rawName.slice(0, dotIdx) : rawName
+          const extName = dotIdx > 0 ? rawName.slice(dotIdx) : ''
+          let suffix = 2
+          while (usedFilenames.has(`${baseName} (${suffix})${extName}`)) {
+            suffix++
+          }
+          finalName = `${baseName} (${suffix})${extName}`
+          console.warn(`文件名冲突: "${item.filename}" → "${finalName}"`)
+        }
+        usedFilenames.add(finalName)
+        collectedFiles.push({ filename: finalName, blob })
+        // 更新任务为已完成，写入文件大小
+        const sizeStr = blob.size > 1024 * 1024
+          ? `${(blob.size / 1024 / 1024).toFixed(2)} MB`
+          : `${(blob.size / 1024).toFixed(1)} KB`
+        setExportQueue(prev =>
+          prev.map(q => q.id === item.id ? { ...q, status: 'completed' as const, progress: 100, size: sizeStr } : q)
+        )
+      }
+
+      // 更新整体进度
+      completedCount++
+      setExportOverallProgress({ current: completedCount, total: newItems.length, currentFrame: frameName, phase: 'fetching' })
+    }
+
+    try {
+      // 并发执行：限制同时进行的任务数量为 CONCURRENCY
+      // 使用简单的分批策略，避免 Promise 池复杂度
+      for (let i = 0; i < newItems.length; i += CONCURRENCY) {
+        const batch = newItems.slice(i, i + CONCURRENCY)
+        // 并行处理这一批
+        await Promise.all(batch.map(item => processItem(item)))
+      }
+
+      // 7. 打包成 ZIP 一次性下载到浏览器默认下载目录
+      setExportOverallProgress({ current: newItems.length, total: newItems.length, phase: 'saving' })
+
+      const resolutionLabel = `${scale}x`
+
+      // 若存在失败，给出友好提示但不阻止成功弹窗
+      if (failedItems.length > 0) {
+        setExportErrorMessage(`部分 Frame 导出失败（${failedItems.length}/${newItems.length}）：${failedItems.join('、')}`)
+      }
+
+      // 打包成 ZIP 下载（ZIP 内包含以项目名命名的文件夹，解压后即为独立文件夹）
+      const zip = new JSZip()
+      for (const { filename, blob } of collectedFiles) {
+        zip.file(`${projectName}/${filename}`, blob)
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const downloadUrl = URL.createObjectURL(zipBlob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = `${projectName}.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(downloadUrl)
+
+      setExportOverallProgress({ current: newItems.length, total: newItems.length, phase: 'done' })
+
+      setCompletedExport({
+        type: 'PNG 导出',
+        filename: `${projectName}.zip`,
+        size: zipBlob.size > 1024 * 1024
+          ? `${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`
+          : `${(zipBlob.size / 1024).toFixed(1)} KB`,
+        resolution: resolutionLabel,
+      })
+      setExportComplete(true)
+      setIsExporting(false)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      console.error('导出失败:', error)
+      setExportErrorMessage(`导出失败：${reason}`)
+      setIsExporting(false)
+      setExportOverallProgress(null)
+    }
+  }
+
   const handleExport = async (exportType: string) => {
     if (isExporting) return
     if (selectedFrames.length === 0) {
       console.warn('没有选择任何 Frame')
       return
     }
-    
+
     let ext = 'json'
     if (exportType === 'PNG 导出') ext = 'png'
-    else if (exportType === 'SVG 导出') ext = 'svg'
     else if (exportType === '壁纸导出') ext = 'png'
     
     // 获取项目名称（从 Figma 文件信息或使用默认名称）
@@ -588,38 +1307,120 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     }
   }
   
+  // 批量打包下载所有切图资源为 ZIP 文件
+  const [isAssetsZipping, setIsAssetsZipping] = useState(false)
+  const [assetsZipProgress, setAssetsZipProgress] = useState({ current: 0, total: 0 })
+
+  const handleDownloadAllAssetsAsZip = async () => {
+    if (isAssetsZipping || figmaExportAssets.length === 0) return
+    setIsAssetsZipping(true)
+    setAssetsZipProgress({ current: 0, total: figmaExportAssets.length })
+
+    const zip = new JSZip()
+    const usedNames = new Set<string>()
+    const failed: string[] = []
+    const CONCURRENCY = 5  // 浏览器同域名并发上限 6，留 1 个余量
+
+    // 并发分批下载
+    for (let i = 0; i < figmaExportAssets.length; i += CONCURRENCY) {
+      const batch = figmaExportAssets.slice(i, i + CONCURRENCY)
+      await Promise.all(batch.map(async (asset) => {
+        try {
+          const blob = await fetchFigmaImageAsBlob(asset.url)
+          if (!blob || blob.size === 0) {
+            failed.push(asset.name)
+            return
+          }
+          // 文件名安全化 + 冲突检测
+          let filename = `${asset.name.replace(/[\\/:*?"<>|]/g, '_')}.${asset.format.toLowerCase()}`
+          if (usedNames.has(filename)) {
+            const dot = filename.lastIndexOf('.')
+            const base = dot > 0 ? filename.slice(0, dot) : filename
+            const ext = dot > 0 ? filename.slice(dot) : ''
+            let suffix = 2
+            while (usedNames.has(`${base} (${suffix})${ext}`)) suffix++
+            filename = `${base} (${suffix})${ext}`
+          }
+          usedNames.add(filename)
+          zip.file(filename, blob)
+        } catch (err) {
+          console.error(`下载切图 "${asset.name}" 失败:`, err)
+          failed.push(asset.name)
+        }
+        setAssetsZipProgress(prev => ({ ...prev, current: Math.min(prev.current + 1, prev.total) }))
+      }))
+    }
+
+    // 生成 ZIP 并触发下载
+    try {
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const url = window.URL.createObjectURL(zipBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `切图打包_${new Date().toISOString().slice(0, 10)}.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      if (failed.length > 0) {
+        console.warn(`部分切图下载失败（${failed.length}/${figmaExportAssets.length}）:`, failed)
+        notify({ app: 'exportReady', title: '切图打包部分失败', body: `${failed.length}/${figmaExportAssets.length} 个切图下载失败` })
+      } else {
+        notify({ app: 'exportReady', title: '切图打包完成', body: `共 ${figmaExportAssets.length} 个切图已保存为 ZIP` })
+      }
+    } catch (err) {
+      console.error('打包 ZIP 失败:', err)
+      alert(`打包 ZIP 失败: ${err instanceof Error ? err.message : '未知错误'}`)
+    } finally {
+      setIsAssetsZipping(false)
+      setAssetsZipProgress({ current: 0, total: 0 })
+    }
+  }
+  
   const getFrameFileContent = async (frameName: string, filename: string, exportType: string): Promise<Blob | null> => {
     const ext = filename.split('.').pop() || 'png'
     const fileKey = figmaFileInfo?.fileKey
     
-    if (fileKey && frameNodeIds[frameName] && (ext === 'png' || ext === 'svg')) {
+    // 只有在已连接Figma且有有效Token和节点ID时才调用真实API
+    if (figmaConnected && fileKey && frameNodeIds[frameName] && (ext === 'png' || ext === 'svg')) {
       try {
+        // 每次调用时重新获取最新的token（避免token更新后使用旧值）
+        const currentToken = getStoredFigmaToken()
+        if (!currentToken) {
+          console.warn('Figma Token未配置，使用模拟导出')
+          return generateFallbackContent(ext, filename)
+        }
+        
         // 使用真实的 Figma API 获取图片
         const format = ext === 'png' ? 'png' : 'svg'
         const nodeId = frameNodeIds[frameName]
         
         const response = await fetch(`${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${nodeId}&format=${format}&scale=2`, {
           headers: {
-            'X-Figma-Token': FIGMA_API_TOKEN
+            'X-Figma-Token': currentToken
           }
         })
         
         if (response.ok) {
           const data = await response.json()
-          const imageUrl = data.images[nodeId]
+          const imageUrl = data.images?.[nodeId]
           
           if (imageUrl) {
-            // 下载图片
-            const imageResponse = await fetch(imageUrl)
-            return await imageResponse.blob()
+            // 通过后端代理下载图片，避免浏览器直接访问S3被阻止
+            return await fetchFigmaImageAsBlob(imageUrl)
           }
         }
       } catch (error) {
-        console.error('Figma API export error:', error)
+        console.warn('Figma API导出失败，使用模拟导出:', error instanceof Error ? error.message : error)
       }
     }
     
     // Fallback: 生成模拟图片
+    return generateFallbackContent(ext, filename)
+  }
+  
+  // 生成模拟导出内容
+  const generateFallbackContent = async (ext: string, filename: string): Promise<Blob | null> => {
     if (ext === 'png') {
       // Generate a PNG image using Canvas
       const canvas = document.createElement('canvas')
@@ -661,7 +1462,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
         ctx.font = '14px sans-serif'
         ctx.fillText(`Frame: ${filename.replace('.png', '')} - Exported from HMI Agent Studio`, 100, 950)
         
-        return new Promise((resolve) => {
+        return new Promise<Blob | null>((resolve) => {
           canvas.toBlob((blob) => resolve(blob || null), 'image/png')
         })
       }
@@ -687,6 +1488,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const closeExportComplete = () => {
     setExportComplete(false)
     setCompletedExport(null)
+    setExportOverallProgress(null)
+    setExportErrorMessage(null)
   }
   
   const downloadExportedFile = () => {
@@ -758,7 +1561,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   
   const exportContentMap: Record<string, string> = {
     'PNG 导出': 'HMI 界面导出图像',
-    'SVG 导出': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080"><rect fill="#1a1a2e" width="1920" height="1080"/></svg>`,
     '壁纸导出': 'HMI 壁纸导出',
     'JSON 导出': JSON.stringify({ components: [], layout: {}, theme: {} }, null, 2),
     '设计令牌': JSON.stringify({
@@ -1054,9 +1856,13 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     setIsGenerating(true)
     setGenError(null)
     setGeneratedImages([])
+    setSizeVerifyResults({})
 
     try {
       let result: { success: boolean; images: string[]; error?: string }
+
+      // 获取当前选择的尺寸（仅即梦引擎支持自定义尺寸）
+      const presetSize = engine === 'jimeng' ? buildPresetSizeFromSelection() : undefined
 
       if (engine === 'openai') {
         const r = await generateOpenAI(
@@ -1068,6 +1874,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
         const r = await generateWithPoll(
           promptInput || '参考这张图片的风格生成智能座舱HMI界面',
           refImage || undefined,
+          undefined,
+          presetSize?.apiSize,
         )
         result = r
       }
@@ -1079,6 +1887,35 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
           result.images,
           'hmi',
         )
+
+        // 生成成功后异步校验尺寸（不阻塞用户操作，不显著增加耗时）
+        if (presetSize) {
+          setIsVerifyingSize(true)
+          const verifyMap: Record<string, CheckAndVerifyResult | undefined> = {}
+          Promise.all(result.images.map(async (url) => {
+            try {
+              const verifyResult = await checkAndVerifyImage(url, presetSize)
+              return { url, verifyResult }
+            } catch {
+              return { url, verifyResult: null }
+            }
+          })).then((results) => {
+            results.forEach(({ url, verifyResult }) => {
+              if (verifyResult) verifyMap[url] = verifyResult
+            })
+            setSizeVerifyResults({ ...verifyMap })
+            // 统计校验结果并通知
+            const allMatch = Object.values(verifyMap).every(r => r?.verify.match)
+            const adjustedCount = Object.values(verifyMap).filter(r => r?.adjusted).length
+            if (adjustedCount > 0) {
+              notify({ app: 'aiGenerate', title: '尺寸已自动调整', body: `${adjustedCount} 张图片因尺寸不符已裁剪至 ${presetSize.id}` })
+            } else if (allMatch) {
+              notify({ app: 'aiGenerate', title: '尺寸校验通过', body: `所有图片尺寸符合 ${presetSize.label}（${presetSize.width}×${presetSize.height}）` })
+            }
+          }).finally(() => {
+            setIsVerifyingSize(false)
+          })
+        }
       } else {
         setGenError(result.error || '生成失败，请稍后重试')
       }
@@ -1397,7 +2234,13 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       })
       const data = await resp.json()
       if (data.ok) {
-        setEditResult(data.result)
+        if (editSubMode === 'png2svg') {
+          // 使用 AI 直接返回的 SVG 代码
+          const svgResult = processAIResult(data.result || data)
+          setEditResult(svgResult)
+        } else {
+          setEditResult((data.result as TextExtractResult) || { regions: [], summary: '' })
+        }
       } else {
         setEditError(data.error || '分析失败')
       }
@@ -1406,6 +2249,26 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     } finally {
       setEditAnalyzing(false)
     }
+  }
+
+  // 复制状态追踪
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const handleCopySVG = async (svgComp: SVGComponent) => {
+    const success = await copySVGCode(svgComp.normalizedSvg)
+    if (success) {
+      setCopiedId(svgComp.id)
+      setTimeout(() => setCopiedId(null), 2000)
+    }
+  }
+
+  // 判断是否为 SVG 结果
+  const isSVGResult = (result: EditResultType): result is EditSVGResult => {
+    return 'svgComponents' in result
+  }
+
+  // 判断是否为文本提取结果
+  const isTextResult = (result: EditResultType): result is TextExtractResult => {
+    return 'regions' in result
   }
 
   return (
@@ -1796,7 +2659,10 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
               {generatedImages.length > 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">生成结果 ({generatedImages.length})</span>
+                    <span className="text-xs text-muted-foreground">
+                      生成结果 ({generatedImages.length})
+                      {isVerifyingSize && <span className="ml-2 text-primary animate-pulse">· 尺寸校验中…</span>}
+                    </span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1807,33 +2673,95 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                     </Button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {generatedImages.map((img, i) => (
-                      <div
-                        key={i}
-                        className="rounded-xl overflow-hidden border border-[hsl(var(--foreground)/0.06)] aspect-video relative group cursor-pointer hover:border-[hsl(var(--primary)/0.2)] transition-all duration-300"
-                      >
-                        <img
-                          src={img}
-                          alt={`Generated HMI ${i + 1}`}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-foreground">方案 {i + 1}</span>
-                            <Button
-                              variant="glow"
-                              size="sm"
-                              className="h-6 text-[10px] gap-1"
-                              onClick={() => handleDownload(img, i)}
-                            >
-                              <Download size={10} />
-                              下载 PNG
-                            </Button>
+                    {generatedImages.map((img, i) => {
+                      const vr = sizeVerifyResults[img]
+                      const isMatch = vr?.verify.match
+                      const wasAdjusted = !!vr?.adjusted
+                      return (
+                        <div
+                          key={i}
+                          className="rounded-xl overflow-hidden border border-[hsl(var(--foreground)/0.06)] relative group cursor-pointer hover:border-[hsl(var(--primary)/0.2)] transition-all duration-300"
+                          style={{ aspectRatio: vr ? `${vr.verify.expected.width} / ${vr.verify.expected.height}` : '16 / 9' }}
+                        >
+                          <img
+                            src={vr?.finalUrl || img}
+                            alt={`Generated HMI ${i + 1}`}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                          {/* 尺寸校验状态徽章 */}
+                          {vr && (
+                            <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium backdrop-blur-md border">
+                              {isMatch ? (
+                                <span className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 px-2 py-0.5 rounded-md">✓ {vr.verify.actual.width}×{vr.verify.actual.height}</span>
+                              ) : wasAdjusted ? (
+                                <span className="bg-amber-500/20 text-amber-400 border-amber-500/30 px-2 py-0.5 rounded-md" title={`原始 ${vr.verify.actual.width}×${vr.verify.actual.height} → 已调整为 ${vr.verify.expected.width}×${vr.verify.expected.height}`}>⚙ 已调整</span>
+                              ) : (
+                                <span className="bg-red-500/20 text-red-400 border-red-500/30 px-2 py-0.5 rounded-md" title={`预期 ${vr.verify.expected.width}×${vr.verify.expected.height} | 实际 ${vr.verify.actual.width}×${vr.verify.actual.height} | 偏差 ${vr.verify.deviationPercent.toFixed(1)}%`}>✗ {vr.verify.actual.width}×{vr.verify.actual.height}</span>
+                              )}
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-foreground">方案 {i + 1}</span>
+                              {vr && !isMatch && !wasAdjusted && (
+                                <Button
+                                  variant="glow"
+                                  size="sm"
+                                  className="h-6 text-[10px] gap-1"
+                                  onClick={async () => {
+                                    const preset = buildPresetSizeFromSelection()
+                                    const adj = await adjustImageToSize(img, preset)
+                                    setSizeVerifyResults(prev => ({ ...prev, [img]: { ...prev[img]!, finalUrl: adj.dataUrl, adjusted: adj } }))
+                                  }}
+                                >
+                                  <Maximize2 size={10} />
+                                  调整尺寸
+                                </Button>
+                              )}
+                              <Button
+                                variant="glow"
+                                size="sm"
+                                className="h-6 text-[10px] gap-1"
+                                onClick={() => handleDownload(vr?.finalUrl || img, i)}
+                              >
+                                <Download size={10} />
+                                下载 PNG
+                              </Button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
+                  {/* 尺寸对比详情卡片 */}
+                  {Object.keys(sizeVerifyResults).length > 0 && (
+                    <div className="rounded-xl border border-[hsl(var(--foreground)/0.06)] bg-[hsl(var(--surface-secondary)/0.3)] p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-foreground">尺寸校验详情</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          预期: {(() => { const p = buildPresetSizeFromSelection(); return `${p.label} ${p.width}×${p.height}`; })()}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {Object.entries(sizeVerifyResults).map(([url, vr]) => {
+                          if (!vr) return null
+                          return (
+                            <div key={url} className="flex items-center gap-2 text-[10px]">
+                              <span className="text-muted-foreground">·</span>
+                              <span className="text-foreground font-medium">预期 {vr.verify.expected.width}×{vr.verify.expected.height}</span>
+                              <span className="text-muted-foreground">→</span>
+                              <span className={vr.verify.match ? 'text-emerald-400' : 'text-amber-400'}>
+                                实际 {vr.verify.actual.width || '?'}×{vr.verify.actual.height || '?'}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {vr.verify.match ? '一致' : `偏差 ${vr.verify.deviationPercent.toFixed(1)}%${vr.adjusted ? ' (已调整)' : ''}`}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1892,20 +2820,20 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                 <div className="text-center space-y-2 flex-1">
                   <div className="flex items-center justify-center gap-3">
                     <h2 className="text-xl font-semibold text-foreground">
-                      {editSubMode === 'png2edit' ? 'PNG 转可编辑' : '文本提取'}
+                      {editSubMode === 'png2svg' ? 'PNG 生成 SVG' : '文本提取'}
                     </h2>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setEditSubMode(editSubMode === 'png2edit' ? 'text_extract' : 'png2edit')}
+                      onClick={() => setEditSubMode(editSubMode === 'png2svg' ? 'text_extract' : 'png2svg')}
                       className="h-7 text-xs"
                     >
-                      切换到 {editSubMode === 'png2edit' ? '文本提取' : 'PNG 转可编辑'}
+                      切换到 {editSubMode === 'png2svg' ? '文本提取' : 'PNG 生成 SVG'}
                     </Button>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {editSubMode === 'png2edit'
-                      ? '上传 HMI 界面截图，AI 自动解析为可编辑的设计组件'
+                    {editSubMode === 'png2svg'
+                      ? '上传 HMI 界面截图，AI 自动识别并生成可编辑的 SVG 组件'
                       : '上传 HMI 界面截图，AI 自动识别并提取所有文本内容'}
                   </p>
                   {/* Quick Check Items */}
@@ -1946,7 +2874,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs text-primary">
                     <Upload size={12} />
-                    <span>{editSubMode === 'png2edit' ? '上传 HMI 界面截图' : '上传需要提取文本的截图'}</span>
+                    <span>{editSubMode === 'png2svg' ? '上传 HMI 界面截图' : '上传需要提取文本的截图'}</span>
                   </div>
                   {editImage && (
                     <button onClick={removeEditImage} className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive">
@@ -1993,12 +2921,12 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                 {editAnalyzing ? (
                   <>
                     <Loader2 size={12} className="animate-spin" />
-                    分析中...
+                    生成中...
                   </>
-                ) : editSubMode === 'png2edit' ? (
+                ) : editSubMode === 'png2svg' ? (
                   <>
                     <Layers size={12} />
-                    开始解析组件
+                    生成 SVG 组件
                   </>
                 ) : (
                   <>
@@ -2014,62 +2942,204 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs text-primary">
                       <CheckCircle2 size={12} />
-                      <span className="font-medium">{editSubMode === 'png2edit' ? '组件解析结果' : '文本提取结果'}</span>
+                      <span className="font-medium">
+                        {editSubMode === 'png2svg' ? 'SVG 组件生成结果' : '文本提取结果'}
+                      </span>
+                      {isSVGResult(editResult) && (
+                        <span className="px-1.5 py-0.5 rounded bg-primary/10 text-[9px] text-primary">
+                          {editResult.svgComponents.length} 个组件
+                        </span>
+                      )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-[10px] h-6 gap-1"
-                      onClick={() => {
-                        const blob = new Blob([JSON.stringify(editResult, null, 2)], { type: 'application/json' })
-                        const a = document.createElement('a')
-                        a.href = URL.createObjectURL(blob)
-                        a.download = editSubMode === 'png2edit' ? 'hmi-components.json' : 'hmi-texts.json'
-                        a.click()
-                        URL.revokeObjectURL(a.href)
-                      }}
-                    >
-                      <Download size={10} />
-                      导出 JSON
-                    </Button>
+                    {isSVGResult(editResult) && editResult.svgComponents.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-[10px] h-6 gap-1"
+                        onClick={() => downloadAllSVGComponents(editResult.svgComponents)}
+                      >
+                        <Download size={10} />
+                        导出全部 SVG
+                      </Button>
+                    )}
                   </div>
 
-                  {/* PNG → Editable: Component tree */}
-                  {editSubMode === 'png2edit' && editResult.components && (
-                    <div className="space-y-2 max-h-96 overflow-y-auto">
-                      {editResult.components.map((comp, i) => (
-                        <div key={comp.id || i} className="bg-[hsl(var(--surface-secondary)/0.4)] rounded-lg p-3">
-                          <div className="flex items-center gap-2">
-                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-primary/10 text-primary font-mono">{comp.type}</span>
-                            <span className="text-xs text-foreground">{comp.label}</span>
+                  {/* PNG → SVG: AI 直接生成的 SVG 组件 */}
+                  {isSVGResult(editResult) && editResult.svgComponents.length > 0 && (
+                    <div className="space-y-4 max-h-[550px] overflow-y-auto pr-1">
+                      {/* 类型统计概览 - 按类型分组显示数量 */}
+                      {(() => {
+                        const typeGroups = editResult.svgComponents.reduce((acc, comp) => {
+                          const key = comp.category
+                          if (!acc[key]) acc[key] = { label: comp.categoryLabel, color: getCategoryColor(comp.category), count: 0 }
+                          acc[key].count++
+                          return acc
+                        }, {} as Record<string, { label: string; color: string; count: number }>)
+                        return (
+                          <div className="flex flex-wrap gap-2 p-3 bg-[hsl(var(--surface-secondary)/0.3)] rounded-lg">
+                            {Object.entries(typeGroups).map(([cat, info]) => (
+                              <span
+                                key={cat}
+                                className="px-2 py-1 rounded text-[10px] flex items-center gap-1"
+                                style={{
+                                  backgroundColor: `${info.color}15`,
+                                  color: info.color,
+                                  border: `1px solid ${info.color}30`,
+                                }}
+                              >
+                                <Component size={8} />
+                                {info.label}
+                                <span className="text-[9px] opacity-70">×{info.count}</span>
+                              </span>
+                            ))}
+                            <span className="ml-auto text-[10px] text-muted-foreground self-center">
+                              共 {editResult.svgComponents.length} 个切图元素
+                            </span>
                           </div>
-                          {comp.bounds && (
-                            <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                              {comp.bounds.x}x{comp.bounds.y} &middot; {comp.bounds.width}&times;{comp.bounds.height}
-                            </p>
-                          )}
-                          {comp.styles && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {Object.entries(comp.styles).map(([k, v]) => (
-                                <span key={k} className="px-1 py-0.5 rounded text-[9px] bg-[hsl(var(--foreground)/0.04)] text-muted-foreground">
-                                  {k}: {String(v)}
-                                </span>
-                              ))}
+                        )
+                      })()}
+
+                      {/* 独立 SVG 切图卡片 - 紧凑网格布局 */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {editResult.svgComponents.map((svgComp) => (
+                        <div
+                          key={svgComp.id}
+                          className="bg-[hsl(var(--surface-secondary)/0.4)] rounded-lg overflow-hidden border border-[hsl(var(--foreground)/0.06)] flex flex-col"
+                        >
+                          {/* 组件头部 - 紧凑 */}
+                          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[hsl(var(--foreground)/0.04)]">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <div
+                                className="w-4 h-4 rounded flex-shrink-0 items-center justify-center flex"
+                                style={{ backgroundColor: `${getCategoryColor(svgComp.category)}25` }}
+                              >
+                                <Component size={8} style={{ color: getCategoryColor(svgComp.category) }} />
+                              </div>
+                              <span className="text-[11px] font-medium text-foreground truncate" title={svgComp.name}>{svgComp.name}</span>
                             </div>
-                          )}
+                            <span className="text-[9px] text-muted-foreground flex-shrink-0 ml-1">
+                              {svgComp.width}×{svgComp.height}
+                            </span>
+                          </div>
+
+                          {/* SVG 预览 - 棋盘格背景，小元素居中 */}
+                          <div
+                            className="p-2 flex items-center justify-center flex-1"
+                            style={{
+                              minHeight: '90px',
+                              backgroundImage: 'linear-gradient(45deg, #334155 25%, transparent 25%), linear-gradient(-45deg, #334155 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #334155 75%), linear-gradient(-45deg, transparent 75%, #334155 75%)',
+                              backgroundSize: '10px 10px',
+                              backgroundPosition: '0 0, 0 5px, 5px -5px, -5px 0px',
+                              backgroundColor: '#1e293b',
+                            }}
+                          >
+                            <svg
+                              viewBox={`0 0 ${svgComp.width} ${svgComp.height}`}
+                              className="max-w-full max-h-[100px]"
+                              style={{
+                                maxWidth: '85%',
+                                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
+                              }}
+                              preserveAspectRatio="xMidYMid meet"
+                              dangerouslySetInnerHTML={{ __html: svgComp.innerContent }}
+                            />
+                          </div>
+
+                          {/* 操作按钮 - 紧凑 */}
+                          <div className="flex items-center border-t border-[hsl(var(--foreground)/0.04)] divide-x divide-[hsl(var(--foreground)/0.04)]">
+                            <button
+                              className="flex-1 py-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--foreground)/0.04)] transition-colors flex items-center justify-center gap-1"
+                              onClick={() => handleCopySVG(svgComp)}
+                            >
+                              {copiedId === svgComp.id ? (
+                                <><Check size={9} className="text-emerald-400" />已复制</>
+                              ) : (
+                                <><Copy size={9} />复制</>
+                              )}
+                            </button>
+                            <button
+                              className="flex-1 py-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--foreground)/0.04)] transition-colors flex items-center justify-center gap-1"
+                              onClick={() => downloadSVGComponent(svgComp)}
+                            >
+                              <Download size={9} />导出
+                            </button>
+                          </div>
+
+                          {/* SVG 代码预览 - 折叠 */}
+                          <details className="border-t border-[hsl(var(--foreground)/0.04)]">
+                            <summary className="px-2 py-1 text-[9px] text-muted-foreground cursor-pointer hover:text-foreground text-center">
+                              代码
+                            </summary>
+                            <pre className="px-2 pb-2 text-[8px] text-muted-foreground overflow-x-auto max-h-24 overflow-y-auto whitespace-pre-wrap break-all font-mono bg-[hsl(var(--surface-secondary)/0.3)]">
+                              {svgComp.normalizedSvg}
+                            </pre>
+                          </details>
                         </div>
-                      ))}
+                        ))}
+                      </div>
+
+                      {/* 导出全部按钮 */}
+                      <div className="flex justify-center pt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 text-xs"
+                          onClick={() => downloadAllSVGComponents(editResult.svgComponents)}
+                        >
+                          <Download size={12} />
+                          导出全部 {editResult.svgComponents.length} 个 SVG 切图
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PNG → SVG: 错误状态 - 显示原始图片和提示 */}
+                  {isSVGResult(editResult) && (editResult.hasError || editResult.svgComponents.length === 0) && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs">
+                        <AlertCircle size={14} />
+                        <span>{editResult.errorMessage || editResult.summary || '未能识别图片中的组件'}</span>
+                      </div>
+
+                      {editImage && (
+                        <div className="bg-[hsl(var(--surface-secondary)/0.3)] rounded-lg p-3">
+                          <p className="text-[10px] text-muted-foreground mb-2">原始上传图片：</p>
+                          <div className="border border-[hsl(var(--foreground)/0.06)] rounded-lg overflow-hidden">
+                            <img
+                              src={editImage}
+                              alt="上传的 HMI 界面"
+                              className="w-full h-auto max-h-[250px] object-contain"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 原始AI输出调试信息 */}
+                      {editResult._raw && (
+                        <details className="bg-[hsl(var(--surface-secondary)/0.2)] rounded-lg">
+                          <summary className="px-3 py-2 text-[10px] text-muted-foreground cursor-pointer hover:text-foreground">
+                            查看 AI 原始输出（调试用）
+                          </summary>
+                          <pre className="px-3 pb-3 text-[9px] text-muted-foreground overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all font-mono border-t border-[hsl(var(--foreground)/0.06)] pt-2">
+                            {editResult._raw}
+                          </pre>
+                        </details>
+                      )}
+
+                      <p className="text-[10px] text-muted-foreground">
+                        提示：请确保上传清晰完整的车载 HMI 界面截图。如果仍有问题，可以尝试重新生成。
+                      </p>
                     </div>
                   )}
 
                   {/* Text Extract: Region groups */}
-                  {editSubMode === 'text_extract' && editResult.regions && (
+                  {isTextResult(editResult) && editResult.regions && (
                     <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {editResult.regions.map((region, i) => (
+                      {editResult.regions.map((region: EditRegion, i: number) => (
                         <div key={i} className="bg-[hsl(var(--surface-secondary)/0.4)] rounded-lg p-3">
                           <div className="text-xs font-medium text-foreground mb-2">{region.name}</div>
                           <div className="space-y-1">
-                            {region.texts?.map((t, j) => (
+                            {region.texts?.map((t: { type: string; content: string; description?: string }, j: number) => (
                               <div key={j} className="flex items-center gap-2 text-[11px]">
                                 <span className="px-1 py-0.5 rounded text-[9px] bg-primary/10 text-primary">{t.type}</span>
                                 <span className="text-foreground">{t.content}</span>
@@ -2088,14 +3158,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                       {editResult.summary}
                     </p>
                   )}
-
-                  {/* Raw JSON toggle */}
-                  <details className="text-[10px]">
-                    <summary className="text-muted-foreground cursor-pointer hover:text-foreground">查看原始 JSON</summary>
-                    <pre className="mt-2 p-3 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] text-muted-foreground overflow-x-auto text-[9px] max-h-48 overflow-y-auto">
-                      {JSON.stringify(editResult, null, 2)}
-                    </pre>
-                  </details>
                 </div>
               )}
             </motion.div>
@@ -2817,16 +3879,39 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
 
                       {!figmaConnected ? (
                         <div className="space-y-3">
+                          {/* 上传区域 — 照抄ThemeSwapPanel的虚线边框样式 */}
+                          {!isConnecting ? (
+                            <div
+                              onClick={() => document.getElementById('figma-url-input')?.focus()}
+                              className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-dashed border-[hsl(var(--foreground)/0.1)] hover:border-primary/40 transition-colors cursor-pointer"
+                            >
+                              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground/50 mb-2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                              </svg>
+                              <span className="text-xs text-muted-foreground">输入 Figma 文件链接</span>
+                              <span className="text-[10px] text-muted-foreground/50 mt-1">点击下方输入框粘贴链接</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-primary/30 bg-primary/5 transition-colors">
+                              <Loader2 size={20} className="text-primary animate-spin mb-2" />
+                              <span className="text-xs text-primary font-medium">正在连接 Figma...</span>
+                              <span className="text-[10px] text-primary/60 mt-0.5">{analyzingStatus || '加载中'}</span>
+                            </div>
+                          )}
                           <input
+                            id="figma-url-input"
                             type="text"
                             value={figmaUrl}
                             onChange={(e) => setFigmaUrl(e.target.value)}
-                            placeholder="输入 Figma 文件链接..."
+                            onKeyDown={(e) => { if (e.key === 'Enter' && figmaUrl.trim()) connectFigma(); }}
+                            placeholder="https://www.figma.com/file/..."
                             className="w-full px-4 py-2 rounded-lg bg-background/50 border border-white/10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
                           />
                           <Button
                             onClick={connectFigma}
-                            disabled={!figmaUrl.trim()}
+                            disabled={!figmaUrl.trim() || isConnecting}
                             className="w-full"
                           >
                             连接 Figma
@@ -2834,21 +3919,18 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                              <span className="text-sm font-medium text-foreground">已连接 Figma</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground">{figmaFileInfo?.name}</p>
+                          {/* 已连接状态 — 照抄ThemeSwapPanel的上传成功样式 */}
+                          <div className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-emerald-500/30 bg-emerald-500/5 transition-colors">
+                            <CheckCircle2 size={20} className="text-emerald-400 mb-2" />
+                            <span className="text-xs text-emerald-400 font-medium truncate max-w-full px-1">{figmaFileInfo?.name}</span>
+                            <span className="text-[10px] text-emerald-400/60 mt-0.5">已连接 · {figmaFrames.length} 个画板</span>
+                            <button
+                              onClick={disconnectFigma}
+                              className="mt-2 text-[10px] text-primary/60 hover:text-primary transition-colors"
+                            >
+                              重新连接
+                            </button>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={disconnectFigma}
-                            className="w-full h-8 text-xs"
-                          >
-                            断开连接
-                          </Button>
                         </div>
                       )}
                     </div>
@@ -2882,9 +3964,9 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                             <p className="text-[10px] mt-1">请先连接 Figma</p>
                           </div>
                         ) : (
-                          figmaFrames.map((frame) => (
+                          figmaFrames.map((frame, index) => (
                             <label
-                              key={`list-${frame}`}
+                              key={`list-${index}-${frame}`}
                               className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all duration-200 ${
                                 selectedFrames.includes(frame)
                                   ? 'bg-primary/10 border border-primary/20'
@@ -2916,38 +3998,118 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                   <div className="col-span-5">
                     <div className="glass rounded-xl border border-white/10 h-full flex flex-col">
                       <div className="p-3 border-b border-white/5">
-                        <h4 className="text-xs font-medium text-foreground">Frame 预览</h4>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-medium text-foreground">
+                              {figmaPreviewMode === 'frames' ? 'Frame 预览' : '切图预览'}
+                            </h4>
+                            {/* 刷新按钮 */}
+                            {figmaConnected && figmaPreviewMode === 'frames' && selectedFrames.length > 0 && (
+                              <button
+                                onClick={refreshFramePreviews}
+                                disabled={previewsLoading}
+                                className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                                title="刷新预览图"
+                              >
+                                <RefreshCw size={12} className={previewsLoading ? 'animate-spin' : ''} />
+                              </button>
+                            )}
+                          </div>
+                          {/* 画板/切图切换Tab */}
+                          {figmaConnected && (
+                            <div className="flex items-center bg-black/20 rounded-lg p-0.5">
+                              <button
+                                onClick={() => setFigmaPreviewMode('frames')}
+                                className={`px-2.5 py-1 text-[10px] rounded-md transition-all duration-200 flex items-center gap-1 ${
+                                  figmaPreviewMode === 'frames'
+                                    ? 'bg-primary/20 text-primary'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <Layout size={12} />
+                                画板 ({selectedFrames.length})
+                              </button>
+                              <button
+                                onClick={() => setFigmaPreviewMode('assets')}
+                                className={`px-2.5 py-1 text-[10px] rounded-md transition-all duration-200 flex items-center gap-1 ${
+                                  figmaPreviewMode === 'assets'
+                                    ? 'bg-primary/20 text-primary'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <ImageIcon size={12} />
+                                切图 ({figmaExportAssets.length})
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <div className="flex-1 overflow-y-auto p-4">
-                        {figmaFrames.length === 0 ? (
+                        {figmaFrames.length === 0 && figmaExportAssets.length === 0 ? (
                           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                             <ImageIcon size={48} className="opacity-30 mb-4" />
                             <p className="text-sm">预览区域</p>
                             <p className="text-xs mt-1">连接 Figma 后显示 Frame 预览</p>
                           </div>
-                        ) : (
+                        ) : figmaPreviewMode === 'frames' ? (
                           <div className="space-y-4">
-                            {selectedFrames.map((frame) => (
+                            {/* 全局加载指示器 */}
+                            {previewsLoading && Object.keys(framePreviews).length === 0 && (
+                              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                                <Loader2 size={20} className="animate-spin mr-2" />
+                                <span className="text-xs">正在从 Figma 加载画板预览图...</span>
+                              </div>
+                            )}
+                            {selectedFrames.map((frame, index) => (
                               <motion.div
-                                key={`preview-${frame}`}
+                                key={`preview-${index}-${frame}`}
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="relative rounded-xl overflow-hidden border border-white/10 aspect-video"
+                                className="relative rounded-xl overflow-hidden border border-white/10 bg-black/20"
                               >
                                 {framePreviews[frame] ? (
-                                  <img
-                                    src={framePreviews[frame]}
+                                  <FigmaImage
+                                    url={framePreviews[frame]}
                                     alt={frame}
-                                    className="w-full h-full object-cover"
+                                    preview={true}
+                                    className="w-full h-auto object-contain"
+                                    onError={() => {
+                                      // 所有代理都失败，清除该预览并标记错误
+                                      setFramePreviews(prev => {
+                                        const next = { ...prev }
+                                        delete next[frame]
+                                        return next
+                                      })
+                                      setPreviewErrors(prev => ({ ...prev, [frame]: true }))
+                                    }}
                                   />
-                                ) : (
-                                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#0f172a] to-[#1e293b]">
+                                ) : previewErrors[frame] ? (
+                                  /* 加载失败状态 */
+                                  <div className="h-[300px] flex items-center justify-center bg-gradient-to-br from-red-950/30 to-[#1e293b]">
                                     <div className="text-center">
-                                      <div className="w-12 h-12 mx-auto rounded-lg bg-primary/10 flex items-center justify-center mb-3">
-                                        <Layout size={24} className="text-primary" />
+                                      <div className="w-12 h-12 mx-auto rounded-lg bg-red-500/10 flex items-center justify-center mb-3">
+                                        <AlertCircle size={24} className="text-red-400" />
                                       </div>
                                       <p className="text-sm font-medium text-foreground">{frame}</p>
-                                      <p className="text-xs text-muted-foreground mt-1">Frame 预览</p>
+                                      <p className="text-xs text-red-400/70 mt-1">预览图加载失败</p>
+                                      <button
+                                        onClick={() => retryFramePreview(frame)}
+                                        className="mt-3 px-3 py-1 text-[10px] rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-1 mx-auto"
+                                      >
+                                        <RefreshCw size={10} />
+                                        重试
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* 加载中状态 */
+                                  <div className="h-[300px] flex items-center justify-center bg-gradient-to-br from-[#0f172a] to-[#1e293b]">
+                                    <div className="text-center">
+                                      <div className="w-12 h-12 mx-auto rounded-lg bg-primary/10 flex items-center justify-center mb-3">
+                                        <Loader2 size={24} className="text-primary animate-spin" />
+                                      </div>
+                                      <p className="text-sm font-medium text-foreground">{frame}</p>
+                                      <p className="text-xs text-muted-foreground mt-1">正在加载真实画板内容...</p>
                                     </div>
                                   </div>
                                 )}
@@ -2956,6 +4118,100 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                                 </div>
                               </motion.div>
                             ))}
+                          </div>
+                        ) : (
+                          /* 切图预览网格 */
+                          <div className="space-y-3">
+                            {assetsLoading && (
+                              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                                <Loader2 size={20} className="animate-spin mr-2" />
+                                <span className="text-xs">正在从 Figma 加载切图资源...</span>
+                              </div>
+                            )}
+                            {!assetsLoading && figmaExportAssets.length === 0 && (
+                              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                                <ImageIcon size={36} className="opacity-30 mb-3" />
+                                <p className="text-sm">未找到切图资源</p>
+                                <p className="text-xs mt-1">在 Figma 中为图层添加导出设置（PNG/SVG）</p>
+                              </div>
+                            )}
+                            {!assetsLoading && figmaExportAssets.length > 0 && (
+                              <>
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-[10px] text-muted-foreground">
+                                    共 {figmaExportAssets.length} 个切图资源
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={refreshExportAssets}
+                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                                      title="刷新切图"
+                                    >
+                                      <RefreshCw size={10} />
+                                      刷新
+                                    </button>
+                                    <button
+                                      onClick={handleDownloadAllAssetsAsZip}
+                                      disabled={isAssetsZipping}
+                                      title="将所有切图打包成一个 ZIP 文件下载"
+                                      className="flex items-center gap-1 px-3 py-1.5 text-[11px] rounded bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                      <Download size={11} className={isAssetsZipping ? 'animate-pulse' : ''} />
+                                      {isAssetsZipping
+                                        ? `打包中 ${assetsZipProgress.current}/${assetsZipProgress.total}`
+                                        : '全部下载 (ZIP)'}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                  {figmaExportAssets.map((asset, index) => (
+                                    <motion.div
+                                      key={`asset-${index}-${asset.id}`}
+                                      initial={{ opacity: 0, scale: 0.95 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      transition={{ delay: index * 0.03 }}
+                                      className="relative group rounded-lg overflow-hidden border border-white/10 bg-black/20"
+                                    >
+                                      <div className="aspect-square flex items-center justify-center p-2 relative">
+                                        {assetErrors[asset.id] ? (
+                                          /* 切图加载失败状态 */
+                                          <div className="flex flex-col items-center justify-center w-full h-full">
+                                            <AlertCircle size={20} className="text-red-400/60 mb-2" />
+                                            <p className="text-[9px] text-red-400/70 text-center px-2 truncate max-w-full">
+                                              {asset.name}
+                                            </p>
+                                            <button
+                                              onClick={() => retryExportAsset(asset.id)}
+                                              className="mt-2 flex items-center gap-1 px-2 py-0.5 text-[9px] rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                                            >
+                                              <RefreshCw size={8} />
+                                              重试
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <FigmaImage
+                                            url={asset.url}
+                                            alt={asset.name}
+                                            preview={true}
+                                            className="max-w-full max-h-full object-contain"
+                                            loading="lazy"
+                                            onError={() => {
+                                              setAssetErrors(prev => ({ ...prev, [asset.id]: true }))
+                                            }}
+                                          />
+                                        )}
+                                      </div>
+                                      <div className="p-2 border-t border-white/5">
+                                        <p className="text-[10px] text-foreground truncate" title={asset.name}>
+                                          {asset.name}
+                                        </p>
+                                        <span className="text-[9px] text-muted-foreground">{asset.format}</span>
+                                      </div>
+                                    </motion.div>
+                                  ))}
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2967,36 +4223,41 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                     <div className="glass rounded-xl border border-white/10 p-4">
                       <h4 className="text-xs font-medium text-foreground mb-3">导出选项</h4>
                       <div className="space-y-2">
-                        {[
-                          { icon: <ImageIcon size={16} />, title: 'PNG 导出', desc: '逐 Frame 导出' },
-                          { icon: <Layers size={16} />, title: 'SVG 导出', desc: '矢量图形' },
-                          { icon: <Monitor size={16} />, title: '壁纸导出', desc: '1920x1080' },
-                          { icon: <FileCode size={16} />, title: 'JSON 导出', desc: '结构数据' },
-                          { icon: <Palette size={16} />, title: '设计令牌', desc: '导出设计变量' },
-                          { icon: <Zap size={16} />, title: '开发导出', desc: '开发者资源' },
-                        ].map((format) => (
-                          <motion.button
-                            key={format.title}
-                            onClick={() => handleExport(format.title)}
-                            disabled={!figmaConnected || selectedFrames.length === 0 || isExporting}
-                            className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 ${
-                              figmaConnected && selectedFrames.length > 0
-                                ? 'bg-background/50 hover:bg-primary/10 border border-transparent hover:border-primary/20'
-                                : 'bg-background/30 opacity-50 cursor-not-allowed border border-transparent'
-                            }`}
-                            whileHover={figmaConnected && selectedFrames.length > 0 ? { x: 4 } : {}}
-                          >
-                            <span className={`${
-                              figmaConnected && selectedFrames.length > 0 ? 'text-primary/70' : 'text-muted-foreground/40'
-                            }`}>
-                              {format.icon}
-                            </span>
-                            <div className="flex-1">
-                              <div className="text-xs font-medium text-foreground">{format.title}</div>
-                              <div className="text-[10px] text-muted-foreground">{format.desc}</div>
-                            </div>
-                          </motion.button>
-                        ))}
+                        {/* PNG 导出 — 点击直接开始导出 */}
+                        <motion.button
+                          onClick={() => {
+                            setExportErrorMessage(null)
+                            handlePngExport()
+                          }}
+                          disabled={!figmaConnected || selectedFrames.length === 0 || isExporting}
+                          className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 ${
+                            figmaConnected && selectedFrames.length > 0
+                              ? 'bg-background/50 hover:bg-primary/10 border border-transparent hover:border-primary/20'
+                              : 'bg-background/30 opacity-50 cursor-not-allowed border border-transparent'
+                          }`}
+                          whileHover={figmaConnected && selectedFrames.length > 0 ? { x: 4 } : {}}
+                        >
+                          <span className={`${
+                            figmaConnected && selectedFrames.length > 0 ? 'text-primary/70' : 'text-muted-foreground/40'
+                          }`}>
+                            <ImageIcon size={16} />
+                          </span>
+                          <div className="flex-1">
+                            <div className="text-xs font-medium text-foreground">PNG 导出</div>
+                            <div className="text-[10px] text-muted-foreground">逐 Frame 导出 · 2x · 保留透明度</div>
+                          </div>
+                        </motion.button>
+                      </div>
+
+                      {/* 当前已选 Frame 数量提示 */}
+                      <div className="mt-3 pt-3 border-t border-white/5">
+                        <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                          <CheckCircle2 size={10} className="text-emerald-400" />
+                          当前选中：<span className="text-foreground font-medium">{selectedFrames.length}</span> 个 Frame
+                          {selectedFrames.length > 0 && (
+                            <span className="text-muted-foreground/60">· 保留透明度</span>
+                          )}
+                        </p>
                       </div>
                     </div>
 
@@ -3028,6 +4289,58 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                     <h3 className="text-sm font-medium text-foreground">导出队列</h3>
                     <span className="text-xs text-muted-foreground">{exportQueue.length} 个任务</span>
                   </div>
+
+                  {/* 整体进度条 */}
+                  {exportOverallProgress && exportOverallProgress.phase !== 'done' && (
+                    <div className="mb-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Loader2 size={12} className="animate-spin text-primary" />
+                          <span className="text-[11px] text-foreground font-medium">
+                            {exportOverallProgress.phase === 'fetching' && '正在获取图片'}
+                            {exportOverallProgress.phase === 'encoding' && '正在编码图片'}
+                            {exportOverallProgress.phase === 'zipping' && '正在打包 ZIP'}
+                            {exportOverallProgress.phase === 'saving' && '正在写入文件夹'}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-primary font-medium">
+                          {exportOverallProgress.current} / {exportOverallProgress.total}
+                        </span>
+                      </div>
+                      {exportOverallProgress.currentFrame && (
+                        <p className="text-[10px] text-muted-foreground truncate mb-2">
+                          当前：{exportOverallProgress.currentFrame}
+                        </p>
+                      )}
+                      <div className="h-1.5 bg-background/60 rounded-full overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{
+                            width: `${exportOverallProgress.total > 0
+                              ? (exportOverallProgress.current / exportOverallProgress.total) * 100
+                              : 0}%`
+                          }}
+                          transition={{ duration: 0.3 }}
+                          className="h-full bg-primary rounded-full"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 错误提示 */}
+                  {exportErrorMessage && (
+                    <div className="mb-3 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+                      <AlertCircle size={12} className="text-destructive flex-shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-destructive flex-1">{exportErrorMessage}</p>
+                      <button
+                        onClick={() => setExportErrorMessage(null)}
+                        className="text-destructive/60 hover:text-destructive transition-colors flex-shrink-0"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+
                   {exportQueue.length === 0 ? (
                     <div className="flex items-center justify-center py-4 text-muted-foreground">
                       <Download size={20} className="opacity-30 mr-2" />
@@ -3044,13 +4357,19 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                         >
                           <div className={`w-2 h-2 rounded-full ${
                             item.status === 'completed' ? 'bg-emerald-400' :
-                            item.status === 'processing' ? 'bg-primary' :
+                            item.status === 'processing' ? 'bg-primary animate-pulse' :
                             item.status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground/50'
                           }`} />
                           <div className="max-w-32">
-                            <div className="text-[10px] font-medium text-foreground truncate">{item.filename}</div>
+                            <div className="text-[10px] font-medium text-foreground truncate" title={item.filename}>{item.filename}</div>
                             {item.status === 'processing' && (
                               <div className="text-[9px] text-muted-foreground">{item.progress}%</div>
+                            )}
+                            {item.status === 'completed' && item.size && (
+                              <div className="text-[9px] text-emerald-400/80">{item.size}</div>
+                            )}
+                            {item.status === 'failed' && (
+                              <div className="text-[9px] text-destructive">失败</div>
                             )}
                           </div>
                         </motion.div>
@@ -3190,13 +4509,14 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                           className="group relative rounded-xl overflow-hidden border border-[hsl(var(--foreground)/0.06)] hover:border-primary/30 transition-all duration-300 cursor-pointer"
                           onClick={() => {
                             if (deleteConfirmId === (wallpaper.id || wallpaper.filename)) return
-                            const imgSrc = wallpaper.filename.startsWith('data:') || wallpaper.filename.startsWith('http') ? wallpaper.filename : `/images/wallpaper/${cur.dir}/${wallpaper.filename}`
+                            // 相对路径 ./images/...,保证应用部署在任意子目录(如作品集 /hmi-agent/)时图片仍可加载
+                            const imgSrc = wallpaper.filename.startsWith('data:') || wallpaper.filename.startsWith('http') ? wallpaper.filename : `./images/wallpaper/${cur.dir}/${wallpaper.filename}`
                             setPreviewWallpaper(imgSrc)
                           }}
                         >
                           <div className="aspect-video bg-[hsl(var(--surface-secondary)/0.3)]">
                             <img
-                              src={wallpaper.filename.startsWith('data:') || wallpaper.filename.startsWith('http') ? wallpaper.filename : `/images/wallpaper/${cur.dir}/${wallpaper.filename}`}
+                              src={wallpaper.filename.startsWith('data:') || wallpaper.filename.startsWith('http') ? wallpaper.filename : `./images/wallpaper/${cur.dir}/${wallpaper.filename}`}
                               alt={wallpaper.name}
                               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                               loading="lazy"
@@ -3481,6 +4801,21 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
               )}
             </motion.div>
           )}
+
+          {activeTab === '3d-model' && (
+            <motion.div
+              key="3d-model"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.15 }}
+              className="h-full"
+            >
+              <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground text-sm">加载中...</div>}>
+                <Tripo3DPanel />
+              </Suspense>
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* Wallpaper preview modal */}
@@ -3497,7 +4832,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                 initial={{ scale: 0.9 }}
                 animate={{ scale: 1 }}
                 exit={{ scale: 0.9 }}
-                src={previewWallpaper.startsWith('data:') || previewWallpaper.startsWith('http') || previewWallpaper.startsWith('/') ? previewWallpaper : `/images/wallpaper/${previewWallpaper}`}
+                // 兼容相对路径 ./images/...、绝对路径、data: 与 http(s) 直链;裸文件名才拼接目录
+                src={previewWallpaper.startsWith('data:') || previewWallpaper.startsWith('http') || previewWallpaper.startsWith('/') || previewWallpaper.startsWith('./') ? previewWallpaper : `./images/wallpaper/${previewWallpaper}`}
                 alt="壁纸预览"
                 className="max-w-[90vw] max-h-[85vh] rounded-xl object-contain shadow-2xl"
               />
@@ -3533,7 +4869,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                   </motion.div>
                   <h3 className="text-lg font-medium text-foreground mb-1">导出完成</h3>
                   <p className="text-xs text-muted-foreground mb-4">{completedExport.type} 导出完成</p>
-                  
+
                   <div className="space-y-2 mb-4 text-left">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">文件名</span>
@@ -3551,6 +4887,30 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                     )}
                   </div>
 
+                  {/* 文件位置指示 */}
+                  <div className="mb-4 p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-[11px] text-emerald-300 font-medium">ZIP 已下载到浏览器默认下载文件夹</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          请检查浏览器右上角的下载图标，或前往系统「下载」目录（如 ~/Downloads）
+                        </p>
+                        <p className="text-[10px] text-muted-foreground/70 mt-1">
+                          解压后将得到包含所有 Frame PNG 的文件夹
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 部分失败提示 */}
+                  {exportErrorMessage && (
+                    <div className="mb-4 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-2">
+                      <AlertCircle size={12} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-amber-300 flex-1">{exportErrorMessage}</p>
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -3564,7 +4924,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                       onClick={downloadExportedFile}
                     >
                       <Download size={12} className="mr-1" />
-                      下载
+                      再次下载 ZIP
                     </Button>
                   </div>
                 </div>

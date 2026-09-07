@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import App from './App'
 import LandingPage from './pages/Landing/LandingPage'
 import LoginPage from './pages/LoginPage'
+import FocusRailDemo from './pages/FocusRailDemo'
 import PageTransition from './components/shared/PageTransition'
 
 export default function AppRouter() {
@@ -52,6 +53,15 @@ export default function AppRouter() {
           element={
             <PageTransition>
               <LoginPage />
+            </PageTransition>
+          }
+        />
+        {/* FocusRail 组件演示页 */}
+        <Route
+          path="/focus-rail"
+          element={
+            <PageTransition>
+              <FocusRailDemo />
             </PageTransition>
           }
         />

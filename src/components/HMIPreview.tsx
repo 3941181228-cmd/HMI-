@@ -191,7 +191,7 @@ export default function HMIPreview() {
               </div>
               <div className="flex-1 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.04)] flex items-center justify-center mb-3 relative overflow-hidden">
                 <img
-                  src="/images/wallpaper-abstract.png"
+                  src="./images/wallpaper-abstract.png"
                   alt="Navigation map"
                   className="absolute inset-0 w-full h-full object-cover opacity-30"
                 />

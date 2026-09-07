@@ -45,7 +45,8 @@ export async function saveApiKey(apiKey: string): Promise<{ ok: boolean; message
 
 export async function textToImage(
   prompt: string,
-  modelVersion?: string
+  modelVersion?: string,
+  size?: string
 ): Promise<GenerateResult> {
   try {
     const res = await fetch('/api/jimeng/text2image', {
@@ -54,6 +55,7 @@ export async function textToImage(
       body: JSON.stringify({
         prompt,
         model_version: modelVersion,
+        size,
       }),
     })
 
@@ -82,7 +84,8 @@ export async function textToImage(
 export async function imageToImage(
   prompt: string,
   imageBase64: string,
-  modelVersion?: string
+  modelVersion?: string,
+  size?: string
 ): Promise<GenerateResult> {
   try {
     const res = await fetch('/api/jimeng/image2image', {
@@ -92,6 +95,7 @@ export async function imageToImage(
         prompt,
         image_base64: imageBase64,
         model_version: modelVersion,
+        size,
       }),
     })
 
@@ -121,10 +125,11 @@ export async function generateWithPoll(
   prompt: string,
   imageBase64?: string,
   modelVersion?: string,
+  size?: string,
 ): Promise<GenerateResult> {
   // Ark API is synchronous, no polling needed
   if (imageBase64) {
-    return imageToImage(prompt, imageBase64, modelVersion)
+    return imageToImage(prompt, imageBase64, modelVersion, size)
   }
-  return textToImage(prompt, modelVersion)
+  return textToImage(prompt, modelVersion, size)
 }

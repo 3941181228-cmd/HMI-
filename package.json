@@ -13,6 +13,7 @@
     "@react-three/fiber": "^8.18.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "esm-potrace-wasm": "^0.5.0",
     "file-saver": "^2.0.5",
     "framer-motion": "^11.15.0",
     "jszip": "^3.10.1",

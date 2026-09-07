@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, ArrowRight, Sparkles, LayoutGrid, Type, Palette, Boxes, Upload, CheckCircle2, X, FileJson } from 'lucide-react';
+import { FileText, ArrowRight, Sparkles, LayoutGrid, Type, Palette, Boxes, Upload, CheckCircle2, X, RefreshCw } from 'lucide-react';
 import FigmaImportPanel from './FigmaImportPanel';
 import AIAnalysisAnimation from './AIAnalysisAnimation';
-import DesignScore from './DesignScore';
+import AnalysisReport from './AnalysisReport';
 import IssueList, { Issue } from './IssueList';
 import FigmaPreview from './FigmaPreview';
 import CheckLayoutPage from './CheckLayoutPage';
@@ -12,8 +12,32 @@ import CheckColorPage from './CheckColorPage';
 import CheckSpacingPage from './CheckSpacingPage';
 import { analyzeFigmaDocument, AnalysisResult, CheckIssue, getIssuesByCategory } from '../services/figmaAnalyzer';
 import { saveFigmaState, loadFigmaState, clearFigmaState } from '../services/figmaStorage';
+import { getStoredFigmaToken } from '../services/apiStorage';
+import { getProxiedFigmaImageUrl } from '../services/figmaImageProxy';
+import { CheckRules, DEFAULT_RULES, getActiveRules } from '../services/checkRules';
 
 const FIGMA_API_BASE_URL = '/api/figma';
+
+/**
+ * 带超时的 fetch 封装
+ * 防止网络不通时 fetch 无限等待，导致导入流程卡死
+ * @param url 请求地址
+ * @param options fetch 配置
+ * @param timeoutMs 超时毫秒数（默认 30 秒）
+ */
+async function fetchWithTimeout(
+  url: string,
+  options?: RequestInit,
+  timeoutMs = 30000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface CheckPageProps {
   activeSection?: string;
@@ -25,14 +49,15 @@ const subPageConfig: Record<string, { icon: typeof LayoutGrid; title: string; de
   typography: { icon: Type, title: '字体规范检查', description: '请先导入 Figma 设计稿并完成检测' },
   color: { icon: Palette, title: '色彩对比检查', description: '请先导入 Figma 设计稿并完成检测' },
   spacing: { icon: Boxes, title: '间距系统检查', description: '请先导入 Figma 设计稿并完成检测' },
+  effects: { icon: Sparkles, title: '视觉效果检查', description: '请先导入 Figma 设计稿并完成检测' },
 }
 
 export default function CheckPage({ activeSection = 'full', onNavigate }: CheckPageProps) {
   const savedState = loadFigmaState();
   
-  const [importStep, setImportStep] = useState<'import' | 'analyzing' | 'result'>(
-    (savedState.importStep as 'import' | 'analyzing' | 'result') || 'import'
-  );
+  // importStep 始终从 'import' 开始，不依赖 localStorage 中保存的旧状态
+  // 因为 figmaDocument 和 analysisResult 数据量大，不再持久化到 localStorage
+  const [importStep, setImportStep] = useState<'import' | 'analyzing' | 'result'>('import');
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connected' | 'error'>(
     (savedState.connectionStatus as 'idle' | 'connected' | 'error') || 'idle'
   );
@@ -43,63 +68,65 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
   const [currentPage, setCurrentPage] = useState<string>('');
   const [selectedIssue, setSelectedIssue] = useState<Issue | undefined>();
   const [showPreview, setShowPreview] = useState(false);
-  const [specFile, setSpecFile] = useState<{ name: string; size: string; content: string } | null>(null);
-  const [specFileError, setSpecFileError] = useState<string>('');
-  const [figmaDocument, setFigmaDocument] = useState<any>(savedState.figmaDocument || null);
+  // figmaDocument 和 analysisResult 不从 localStorage 恢复（数据量大）
+  const [figmaDocument, setFigmaDocument] = useState<any>(null);
   const [figmaFileKey, setFigmaFileKey] = useState<string>(savedState.figmaFileKey || '');
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(
-    savedState.analysisResult || null
-  );
-  const [frameImages, setFrameImages] = useState<string[]>(savedState.frameImages || []);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [frameImages, setFrameImages] = useState<Array<{ id: string; name: string; url: string }>>(savedState.frameImages || []);
+  const [exportAssets, setExportAssets] = useState<Array<{ id: string; name: string; url: string; format: string }>>([]);
+  const [selectedRules, setSelectedRules] = useState<CheckRules>(getActiveRules());
 
-  useEffect(() => {
-    if (savedState.connectionStatus === 'connected' && savedState.figmaFileKey) {
-      setConnectionStatus('connected');
-      if (savedState.importStep === 'result') {
-        setImportStep('result');
+  // 递归查找所有带有PNG导出设置的节点（切图）
+  const findExportableNodes = (node: any): Array<{ id: string; name: string; format: string }> => {
+    const results: Array<{ id: string; name: string; format: string }> = [];
+    
+    // 检查当前节点是否有PNG导出设置
+    if (node.exportSettings && Array.isArray(node.exportSettings)) {
+      const pngSetting = node.exportSettings.find((s: any) => s.format === 'PNG');
+      if (pngSetting) {
+        results.push({
+          id: node.id,
+          name: node.name || '未命名切图',
+          format: 'PNG'
+        });
       }
     }
-  }, []);
-
-  const handleSpecFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSpecFileError('')
-    const file = e.target.files?.[0]
-    if (!file) return
-    const validTypes = ['application/json', 'text/csv', 'text/plain']
-    const validExts = ['.json', '.csv', '.txt']
-    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
-    if (!validTypes.includes(file.type) && !validExts.includes(ext)) {
-      setSpecFileError('仅支持 JSON、CSV、TXT 格式的规范文件')
-      return
+    
+    // 递归遍历子节点
+    if (node.children && Array.isArray(node.children)) {
+      for (const child of node.children) {
+        results.push(...findExportableNodes(child));
+      }
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setSpecFileError('文件大小不能超过 5MB')
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const content = ev.target?.result as string
-      setSpecFile({
-        name: file.name,
-        size: file.size < 1024 ? `${file.size} B` : file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-        content,
-      })
-    }
-    reader.readAsText(file)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
+    
+    return results;
+  };
 
-  const handleRemoveSpecFile = () => {
-    setSpecFile(null)
-    setSpecFileError('')
-  }
+  // 当 activeSection 变为 'full'（导入检测）时，确保显示导入界面
+  useEffect(() => {
+    if (activeSection === 'full' && !figmaDocument) {
+      setImportStep('import');
+    }
+  }, [activeSection, figmaDocument]);
 
-  const handleFigmaImport = async (url: string) => {
+  const handleFigmaImport = async (url: string, rules?: CheckRules) => {
     setIsConnecting(true);
     setConnectionStatus('idle');
     setConnectionError('');
     setFigmaUrl(url);
+    // 保存用户选择的检测规则
+    if (rules) {
+      setSelectedRules(rules);
+    }
+
+    // 检查是否配置了Figma Token
+    const figmaToken = getStoredFigmaToken();
+    if (!figmaToken) {
+      setConnectionStatus('error');
+      setConnectionError('请先在「系统设置 → API 配置」中配置 Figma Personal Access Token');
+      setIsConnecting(false);
+      return;
+    }
 
     const figmaUrlRegex = /https?:\/\/(?:www\.)?figma\.com\/(file|proto|design)\/([a-zA-Z0-9-_]+)\/?.*$/;
     const match = url.match(figmaUrlRegex);
@@ -107,55 +134,148 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
 
     if (!fileKey) {
       setConnectionStatus('error');
-      setConnectionError('无法从链接中提取文件 Key，请确认链接格式正确');
+      setConnectionError('无法从链接中提取文件 Key，请确认链接格式正确（应为 https://www.figma.com/file/xxx/...）');
       setIsConnecting(false);
       return;
     }
 
     try {
-      const response = await fetch(`${FIGMA_API_BASE_URL}/files/${fileKey}`);
+      // 请求头带上用户的Figma Token
+      const headers: Record<string, string> = {
+        'X-Figma-Token': figmaToken,
+        'Content-Type': 'application/json',
+      };
 
+      // 调用真实Figma API获取文件数据（带 60 秒超时，防止大文件卡死）
+      const response = await fetchWithTimeout(
+        `${FIGMA_API_BASE_URL}/files/${fileKey}`,
+        { headers },
+        60000,
+      );
+
+      // 根据HTTP状态码给出明确错误提示
+      if (response.status === 401) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(`Figma Token 无效或已过期（401 Unauthorized）。${errData.err || ''}请前往设置重新生成并配置 Token。`);
+      }
       if (response.status === 403) {
-        throw new Error('Token 无效或无权访问该文件（403）');
+        throw new Error('无权访问该文件（403 Forbidden）。请确认文件链接正确，且您的 Figma 账号有该文件的访问权限，或文件已设置为「任何人可查看」。');
       }
       if (response.status === 404) {
-        throw new Error('文件不存在（404），请检查链接是否正确');
+        throw new Error('文件不存在（404 Not Found）。请检查链接是否正确，文件可能已被删除。');
+      }
+      if (response.status === 429) {
+        throw new Error('Figma API 请求频率超限（429 Too Many Requests），请稍后重试。');
       }
       if (!response.ok) {
-        throw new Error(`API 返回错误: ${response.status}`);
+        let errMsg = `Figma API 返回错误: HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.message || errData.err) {
+            errMsg += ` - ${errData.message || errData.err}`;
+          }
+        } catch {}
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
+
+      // Figma API成功返回后，data包含{name, document, ...}
+      // document是DOCUMENT节点，其children是PAGES
+      if (!data.document) {
+        throw new Error('Figma API 返回数据格式异常，未找到 document 节点');
+      }
+
       setFigmaDocument(data);
       setFigmaFileKey(fileKey);
       setCurrentFile(data.name || '未命名文件');
-      setCurrentPage('所有页面');
+      setCurrentPage(data.document.children?.length === 1
+        ? (data.document.children[0]?.name || '所有页面')
+        : `${data.document.children?.length || 0} 个页面`
+      );
 
-      let fetchedImages: string[] = [];
+      // 获取画板缩略图（带 30 秒超时，失败不阻塞主流程）
+      let fetchedImages: Array<{ id: string; name: string; url: string }> = [];
       try {
-        const topFrameIds: string[] = [];
+        // 收集顶层画板的 ID 和名称
+        const topFrames: Array<{ id: string; name: string }> = [];
         for (const page of data.document.children || []) {
           if (page.children) {
             for (const node of page.children) {
-              if (node.type === 'FRAME') topFrameIds.push(node.id);
+              if (node.type === 'FRAME' || node.type === 'COMPONENT') {
+                topFrames.push({ id: node.id, name: node.name || '未命名画板' });
+              }
             }
           }
         }
-        if (topFrameIds.length > 0) {
-          const idsParam = topFrameIds.slice(0, 10).join(',');
-          const imgResponse = await fetch(
-            `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${idsParam}&format=png&scale=1`
+        if (topFrames.length > 0) {
+          const idsParam = topFrames.slice(0, 20).map(f => f.id).join(',');
+          const imgResponse = await fetchWithTimeout(
+            `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=1`,
+            { headers },
+            30000,
           );
           if (imgResponse.ok) {
             const imgData = await imgResponse.json();
             if (imgData.images) {
-              fetchedImages = Object.values(imgData.images) as string[];
+              // 将画板 ID/名称与缩略图 URL 关联，使用代理URL避免S3访问被阻止
+              fetchedImages = topFrames
+                .filter(f => imgData.images[f.id] && imgData.images[f.id] !== 'null')
+                .map(f => ({ id: f.id, name: f.name, url: imgData.images[f.id] }));
               setFrameImages(fetchedImages);
             }
           }
         }
-      } catch {}
+      } catch (imgErr) {
+        console.warn('获取Figma画板缩略图失败:', imgErr);
+        // 图片获取失败不影响主流程
+      }
 
+      // 切图资源获取改为非阻塞：后台异步获取，不等待完成即进入分析步骤
+      // 避免大量切图节点导致串行请求卡死整个导入流程
+      const exportableNodes = findExportableNodes(data.document);
+      if (exportableNodes.length > 0) {
+        // 后台异步获取切图 URL，不阻塞主流程
+        (async () => {
+          try {
+            const batchSize = 50;
+            const allAssets: Array<{ id: string; name: string; url: string; format: string }> = [];
+            // 并行请求所有批次（而非串行），每批带 30 秒超时
+            const batches: Array<typeof exportableNodes> = [];
+            for (let i = 0; i < exportableNodes.length; i += batchSize) {
+              batches.push(exportableNodes.slice(i, i + batchSize));
+            }
+            const batchResults = await Promise.allSettled(
+              batches.map(async (batch) => {
+                const idsParam = batch.map(n => n.id).join(',');
+                const exportImgResponse = await fetchWithTimeout(
+                  `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=2`,
+                  { headers },
+                  30000,
+                );
+                if (!exportImgResponse.ok) return [];
+                const exportImgData = await exportImgResponse.json();
+                if (!exportImgData.images) return [];
+                return batch
+                  .filter(n => exportImgData.images[n.id] && exportImgData.images[n.id] !== 'null')
+                  .map(n => ({ id: n.id, name: n.name, url: exportImgData.images[n.id], format: n.format }));
+              }),
+            );
+            for (const result of batchResults) {
+              if (result.status === 'fulfilled') {
+                allAssets.push(...result.value);
+              }
+            }
+            if (allAssets.length > 0) {
+              setExportAssets(allAssets);
+            }
+          } catch (exportErr) {
+            console.warn('后台获取Figma切图资源失败:', exportErr);
+          }
+        })();
+      }
+
+      // 立即设置连接成功状态，不等切图资源
       setConnectionStatus('connected');
       setIsConnecting(false);
       saveFigmaState({
@@ -169,20 +289,24 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
       });
       setTimeout(() => setImportStep('analyzing'), 500);
     } catch (error) {
-      const errMsg = error instanceof TypeError && error.message === 'Failed to fetch'
-        ? '网络请求失败，请检查 CORS 代理配置是否正确'
+      // 处理超时错误
+      const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+      const errMsg = isTimeout
+        ? '请求超时，Figma API 响应时间过长。请检查网络连接后重试，或尝试使用较小的 Figma 文件。'
+        : error instanceof TypeError && error.message === 'Failed to fetch'
+        ? '网络请求失败，请检查网络连接或开发服务器是否正常运行'
         : (error instanceof Error ? error.message : '未知错误');
       console.error('Figma API error:', error);
       setConnectionStatus('error');
       setConnectionError(errMsg);
       setIsConnecting(false);
-      setCurrentFile('无法连接');
+      setCurrentFile('连接失败');
     }
   };
 
   const handleAnalysisComplete = () => {
     if (figmaDocument) {
-      const result = analyzeFigmaDocument(figmaDocument);
+      const result = analyzeFigmaDocument(figmaDocument, figmaFileKey, selectedRules);
       setAnalysisResult(result);
       saveFigmaState({
         analysisResult: result,
@@ -190,6 +314,17 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
       });
     }
     setImportStep('result');
+  };
+
+  // 使用已有的Figma数据重新运行分析（不需要重新导入）
+  const handleReanalyze = () => {
+    if (figmaDocument) {
+      const result = analyzeFigmaDocument(figmaDocument, figmaFileKey, selectedRules);
+      setAnalysisResult(result);
+      saveFigmaState({
+        analysisResult: result,
+      });
+    }
   };
 
   const handleDisconnect = () => {
@@ -204,26 +339,12 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
     setFigmaFileKey('');
     setAnalysisResult(null);
     setFrameImages([]);
-    setSpecFile(null);
-    setSpecFileError('');
+    setExportAssets([]);
   };
 
   const handleSelectIssue = (issue: Issue) => {
     setSelectedIssue(issue);
     setShowPreview(true);
-  };
-
-  const calculateOverallScore = () => {
-    if (analysisResult) return analysisResult.overallScore;
-    return 0;
-  };
-
-  const getLevel = (score: number): string => {
-    if (analysisResult) return analysisResult.level;
-    if (score >= 90) return '优秀';
-    if (score >= 80) return '专业级';
-    if (score >= 70) return '良好';
-    return '需改进';
   };
 
   const renderCheckPage = () => {
@@ -293,6 +414,15 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
+                    onClick={handleReanalyze}
+                    className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--surface-secondary))] hover:bg-[hsl(var(--surface))] rounded-xl text-sm font-medium transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    重新分析
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => setImportStep('import')}
                     className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--surface-secondary))] hover:bg-[hsl(var(--surface))] rounded-xl text-sm font-medium transition-colors"
                   >
@@ -333,69 +463,10 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                         currentPage={currentPage}
                         errorMessage={connectionError}
                       />
-
-                      {/* Spec File Import */}
-                      <div className="mt-6 space-y-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-                            <FileJson className="w-4 h-4 text-white" />
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-semibold text-foreground">导入规范文件</h3>
-                            <p className="text-xs text-muted-foreground">自定义检测标准（可选）</p>
-                          </div>
-                        </div>
-
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".json,.csv,.txt"
-                          onChange={handleSpecFileUpload}
-                          className="hidden"
-                        />
-
-                        {specFile ? (
-                          <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="flex items-center gap-3 p-3 rounded-xl bg-[hsl(var(--success)/0.08)] border border-[hsl(var(--success)/0.2)]"
-                          >
-                            <CheckCircle2 className="w-4 h-4 text-[hsl(var(--success))] flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-foreground truncate">{specFile.name}</p>
-                              <p className="text-[10px] text-muted-foreground">{specFile.size}</p>
-                            </div>
-                            <button
-                              onClick={handleRemoveSpecFile}
-                              className="w-5 h-5 rounded flex items-center justify-center hover:bg-red-500/20 transition-colors"
-                            >
-                              <X className="w-3 h-3 text-muted-foreground hover:text-red-400" />
-                            </button>
-                          </motion.div>
-                        ) : (
-                          <motion.button
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.99 }}
-                            onClick={() => fileInputRef.current?.click()}
-                            className="w-full py-3 px-4 rounded-xl border-2 border-dashed border-[hsl(var(--border)/0.4)] hover:border-primary/40 hover:bg-primary/5 transition-all flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-primary"
-                          >
-                            <Upload className="w-4 h-4" />
-                            点击上传规范文件
-                          </motion.button>
-                        )}
-
-                        {specFileError && (
-                          <p className="text-xs text-[hsl(var(--destructive))]">{specFileError}</p>
-                        )}
-
-                        <p className="text-[10px] text-muted-foreground/60">
-                          支持 JSON / CSV / TXT 格式，最大 5MB
-                        </p>
-                      </div>
                     </motion.div>
                   )}
 
-                  {importStep === 'result' && (
+                  {importStep === 'result' && analysisResult && (
                     <motion.div
                       key="result"
                       initial={{ opacity: 0, x: -20 }}
@@ -403,16 +474,14 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                       exit={{ opacity: 0, x: -20 }}
                       className="space-y-6"
                     >
-                      <DesignScore
-                        categories={analysisResult ? analysisResult.categories.map(c => ({
-                          id: c.id,
-                          icon: c.id === 'layout' ? LayoutGrid : c.id === 'typography' ? Type : c.id === 'color' ? Palette : Boxes,
-                          label: c.label,
-                          score: c.score,
-                          maxScore: c.maxScore,
-                        })) : []}
-                        overallScore={calculateOverallScore()}
-                        level={getLevel(calculateOverallScore())}
+                      <AnalysisReport
+                        categories={analysisResult.categories}
+                        highlights={analysisResult.highlights}
+                        suggestions={analysisResult.suggestions}
+                        documentInfo={analysisResult.documentInfo}
+                        frameCount={analysisResult.frameCount}
+                        textCount={analysisResult.textCount}
+                        totalNodes={analysisResult.totalNodes}
                       />
                     </motion.div>
                   )}
@@ -445,6 +514,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                     selectedIssue={selectedIssue}
                     onIssueHighlight={handleSelectIssue}
                     images={frameImages}
+                    exportAssets={exportAssets}
                   />
                 </motion.div>
               )}

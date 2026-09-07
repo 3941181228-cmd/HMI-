@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { Button } from './ui/button'
 
-const BRIDGE_URL = 'http://localhost:3000'
+const BRIDGE_URL = ''
 
 interface FrameInfo {
   id: string
@@ -81,12 +81,10 @@ export default function ThemeSwapPanel() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 2000)
       const res = await fetch(`${BRIDGE_URL}/api/health`, { 
-        signal: controller.signal,
-        mode: 'no-cors' // 避免 CORS 错误
+        signal: controller.signal
       })
       clearTimeout(timeoutId)
-      if (res.ok || res.type === 'opaque') {
-        // 如果得到响应（即使是 opaque），尝试解析
+      if (res.ok) {
         try {
           const data = await res.json()
           setBridgeStatus('online')

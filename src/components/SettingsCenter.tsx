@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Settings, X, CheckCircle2, Circle, Key, Eye, EyeOff,
+import {
+  Settings, X, CheckCircle2, Key, Eye, EyeOff,
   Palette, Cpu, Monitor, Sparkles, RefreshCw,
-  Activity, Zap, Moon, Sun, Gauge, ZapOff, Bell,
-  BellOff, Clock, BarChart3, Globe, Save,
-  Contrast
+  Activity, Zap, Moon, Sun, ZapOff, Bell,
+  Clock, BarChart3, Globe, Save,
+  Layout, ExternalLink,
+  Volume2, VolumeX, BellRing, Waves
 } from 'lucide-react'
 import { Button } from './ui/button'
 import { themes as hmiThemes, type HMITheme, type HSLValue } from '@/data/themeData'
+import { getStoredFigmaToken, saveFigmaToken } from '@/services/apiStorage'
+import { useSystemSettings } from '@/contexts/SystemSettingsContext'
 
 function hexToHSL(hex: string): { h: number; s: number; l: number } {
   const r = parseInt(hex.slice(1, 3), 16) / 255
@@ -51,36 +54,29 @@ interface SettingsCenterProps {
 const settingsTabs = [
   { id: 'theme', label: '主题系统', icon: Palette, description: '控制 Workspace 的视觉风格' },
   { id: 'api', label: 'API 配置', icon: Cpu, description: '连接即梦 AI 服务' },
-  { id: 'system', label: '系统偏好', icon: Monitor, description: '调整交互体验' },
-]
-
-const motionLevels = [
-  { id: 'minimal', name: '精简动效', desc: '减少动画效果', icon: ZapOff },
-  { id: 'smooth', name: '流畅动效', desc: '平衡与优雅', icon: Zap },
-  { id: 'premium', name: '高级动效', desc: '极致体验', icon: Sparkles },
-]
-
-const blurLevels = [
-  { id: 'low', name: '低', value: 10 },
-  { id: 'medium', name: '中', value: 20 },
-  { id: 'high', name: '高', value: 30 },
-]
-
-const transitionSpeeds = [
-  { id: 'fast', name: '快速', value: 0.15 },
-  { id: 'smooth', name: '流畅', value: 0.3 },
-  { id: 'slow', name: '慢速', value: 0.5 },
+  { id: 'system', label: '系统偏好', icon: Monitor, description: '动效·模糊·通知' },
 ]
 
 export default function SettingsCenter({ open, onClose, activeTab: initialTab, activeThemeId, applyTheme }: SettingsCenterProps) {
   const [activeTab, setActiveTab] = useState(initialTab || 'api')
   const [autoTheme, setAutoTheme] = useState(false)
-  
-  const [motionLevel, setMotionLevel] = useState('smooth')
-  const [blurLevel, setBlurLevel] = useState('medium')
-  const [transitionSpeed, setTransitionSpeed] = useState('smooth')
-  const [hoverMotion, setHoverMotion] = useState(true)
-  const [reduceMotion, setReduceMotion] = useState(false)
+
+  // 系统偏好设置（从 Context 读写，变化会通过 Context 应用到全局 CSS 变量）
+  const { settings, update, notify } = useSystemSettings()
+
+  // 系统偏好各子面板预览用的本地 UI 状态（不参与持久化）
+  const [motionPreviewKey, setMotionPreviewKey] = useState(0)
+  const [previewNotification, setPreviewNotification] = useState(false)
+
+  // 通知预览到时自动消失
+  useEffect(() => {
+    if (!previewNotification) return
+    const timer = setTimeout(
+      () => setPreviewNotification(false),
+      settings.notifications.bannerDuration * 1000
+    )
+    return () => clearTimeout(timer)
+  }, [previewNotification, settings.notifications.bannerDuration])
 
   const [customPrimary, setCustomPrimary] = useState('#6366f1')
   const [customSecondary, setCustomSecondary] = useState('#8b5cf6')
@@ -215,8 +211,29 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
   const [showAddProvider, setShowAddProvider] = useState(false)
   const [newProviderForm, setNewProviderForm] = useState({ name: '', apiKey: '' })
 
+  // Figma Token 配置
+  const [figmaToken, setFigmaToken] = useState('')
+  const [showFigmaToken, setShowFigmaToken] = useState(false)
+  const [savingFigma, setSavingFigma] = useState(false)
+  const [testingFigma, setTestingFigma] = useState(false)
+  const [figmaConnected, setFigmaConnected] = useState(false)
+  const [figmaUserInfo, setFigmaUserInfo] = useState<{ handle?: string; imgUrl?: string; email?: string } | null>(null)
+
+  // 默认Figma Token（用户提供）
+  const DEFAULT_FIGMA_TOKEN = 'figd_N5M8sfVIMrOD5Kt4Q4mUVQufPwJPpG_KFYcfazgl'
+
   useEffect(() => {
     if (open) {
+      // 加载已保存的Figma Token，如果没有则使用默认Token
+      let savedFigmaToken = getStoredFigmaToken()
+      if (!savedFigmaToken && DEFAULT_FIGMA_TOKEN) {
+        // 首次打开时自动保存默认Token
+        saveFigmaToken(DEFAULT_FIGMA_TOKEN)
+        savedFigmaToken = DEFAULT_FIGMA_TOKEN
+      }
+      if (savedFigmaToken) {
+        setFigmaToken(savedFigmaToken)
+      }
       const savedStatus = (() => {
         try {
           const s = localStorage.getItem('api_config_status')
@@ -250,8 +267,67 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           setApiProviders(prev => prev.map(p => p.id === 'openai' ? { ...p, status: 'connected' as const } : p))
         }
       }).catch(() => {})
+      
+      // 自动验证已保存的Figma Token
+      if (savedFigmaToken) {
+        verifyFigmaToken(savedFigmaToken).then(result => {
+          if (result.valid) {
+            setFigmaConnected(true)
+            setFigmaUserInfo(result.user || null)
+          }
+        }).catch(() => {})
+      }
     }
   }, [open])
+
+  // 验证Figma Token
+  const verifyFigmaToken = async (token: string): Promise<{ valid: boolean; user?: { handle?: string; email?: string; imgUrl?: string }; error?: string }> => {
+    try {
+      const resp = await fetch('/api/figma/me', {
+        headers: { 'X-Figma-Token': token }
+      })
+      const data = await resp.json()
+      if (resp.ok && data.id) {
+        return { valid: true, user: { handle: data.handle, email: data.email, imgUrl: data.imgUrl } }
+      }
+      return { valid: false, error: data.err || 'Token 无效' }
+    } catch (err) {
+      return { valid: false, error: err instanceof Error ? err.message : '网络错误' }
+    }
+  }
+
+  // 保存并验证Figma Token
+  const handleSaveFigma = async () => {
+    const token = figmaToken.trim()
+    if (!token) return
+
+    setSavingFigma(true)
+    setTestingFigma(true)
+    setFigmaConnected(false)
+    setFigmaUserInfo(null)
+
+    const result = await verifyFigmaToken(token)
+
+    if (result.valid) {
+      saveFigmaToken(token)
+      setFigmaConnected(true)
+      setFigmaUserInfo(result.user || null)
+      notify({
+        app: 'figmaSync',
+        title: 'Figma Token 保存成功',
+        body: result.user ? `已连接为 ${result.user.handle || result.user.email || '用户'}` : 'Token 已验证有效',
+      })
+    } else {
+      notify({
+        app: 'figmaSync',
+        title: 'Figma Token 验证失败',
+        body: result.error || '请检查 Token 是否正确',
+      })
+    }
+
+    setSavingFigma(false)
+    setTestingFigma(false)
+  }
 
   const currentProvider = apiProviders.find(p => p.id === activeApiProvider) || apiProviders[0]
 
@@ -275,7 +351,13 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           if (data.ok) {
             updateProvider(activeApiProvider, { status: 'connected' })
             localStorage.setItem('api_config_status', JSON.stringify({ provider: 'openai', configuredAt: Date.now() }))
+            notify({ app: 'aiGenerate', title: '配置已保存', body: `${provider.name} API Key 已保存成功` })
+          } else {
+            notify({ app: 'aiGenerate', title: '保存失败', body: data.message || `${provider.name} API Key 保存失败` })
           }
+        } else {
+          notify({ app: 'aiGenerate', title: '请输入 API Key', body: 'API Key 不能为空' })
+          return
         }
       } else if (activeApiProvider === 'jimeng' || activeApiProvider === 'ark') {
         const res = await fetch('/api/jimeng/save_key', {
@@ -287,9 +369,14 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         if (data.ok) {
           updateProvider(activeApiProvider, { status: 'connected' })
           localStorage.setItem('api_config_status', JSON.stringify({ provider: activeApiProvider, configuredAt: Date.now() }))
+          notify({ app: 'aiGenerate', title: '配置已保存', body: `${provider.name} API Key 已保存成功` })
+        } else {
+          notify({ app: 'aiGenerate', title: '保存失败', body: data.message || `${provider.name} API Key 保存失败` })
         }
       }
-    } catch {}
+    } catch (err) {
+      notify({ app: 'aiGenerate', title: '保存失败', body: err instanceof Error ? err.message : '网络错误，请稍后重试' })
+    }
   }
 
   const testApiConnection = async () => {
@@ -885,6 +972,64 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           </Button>
         </div>
       </motion.div>
+
+      {/* Figma Personal Access Token 配置 */}
+      <motion.div 
+        className="glass rounded-xl p-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.2 }}
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${figmaConnected ? 'bg-emerald-500/20' : 'bg-[hsl(var(--surface-secondary))]'}`}>
+            <Layout size={12} className={figmaConnected ? 'text-emerald-400' : 'text-muted-foreground'} />
+          </div>
+          <span className="text-xs font-semibold text-foreground">Figma Personal Access Token</span>
+          {figmaConnected && <div className="h-4 px-1.5 flex items-center rounded bg-emerald-500/10 text-[9px] text-emerald-400">已连接</div>}
+          {figmaConnected && figmaUserInfo?.handle && (
+            <div className="h-4 px-1.5 flex items-center rounded bg-primary/10 text-[9px] text-primary ml-1">
+              {figmaUserInfo.handle}
+            </div>
+          )}
+        </div>
+        
+        <p className="text-[10px] text-muted-foreground mb-3">
+          用于访问 Figma API 分析设计稿，需要 File content 只读权限。
+          <a 
+            href="https://www.figma.com/developers/api#access-tokens" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-primary hover:underline inline-flex items-center gap-0.5 ml-1"
+          >
+            获取 Token <ExternalLink size={9} />
+          </a>
+        </p>
+
+        <div className="relative mb-3">
+          <Key size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type={showFigmaToken ? 'text' : 'password'}
+            value={figmaToken}
+            onChange={(e) => setFigmaToken(e.target.value)}
+            placeholder="figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            className="w-full h-9 pl-8 pr-9 text-xs bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/30 font-mono"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFigma() }}
+          />
+          <button
+            onClick={() => setShowFigmaToken(!showFigmaToken)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground"
+          >
+            {showFigmaToken ? <EyeOff size={12} /> : <Eye size={12} />}
+          </button>
+        </div>
+
+        <div className="flex gap-2">
+          <Button variant="glass" size="sm" onClick={handleSaveFigma} disabled={savingFigma || !figmaToken.trim()} className="flex-1 gap-1.5">
+            <Key size={12} />
+            {savingFigma ? (testingFigma ? '验证中...' : '保存中...') : '保存并验证'}
+          </Button>
+        </div>
+      </motion.div>
     </div>
   )
 
@@ -1018,301 +1163,478 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
     </div>
   )
 
-  const renderSystemMotion = () => (
-    <div className="space-y-6">
-      <motion.div 
+  // ============================================================
+  // 系统偏好 - 6 大子面板
+  // ============================================================
+
+  const renderSystemMotion = () => {
+    const levels = [
+      { id: 'minimal' as const, name: '低', desc: '减少动画效果', icon: ZapOff },
+      { id: 'smooth' as const, name: '中', desc: '平衡与优雅', icon: Zap },
+      { id: 'premium' as const, name: '高', desc: '极致体验', icon: Sparkles },
+    ]
+    const scale = settings.motion.level === 'minimal' ? 0.4 : settings.motion.level === 'premium' ? 1.6 : 1.0
+
+    return (
+      <motion.div
         className="glass-strong rounded-2xl p-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
         transition={{ duration: 0.4 }}
       >
-        <h4 className="text-sm font-semibold text-foreground mb-4">动效强度</h4>
-        <div className="space-y-3">
-          {motionLevels.map((level) => (
-            <motion.button
-              key={level.id}
-              onClick={() => setMotionLevel(level.id)}
-              whileHover={{ x: 5 }}
-              className={`w-full flex items-center gap-4 p-4 rounded-xl transition-all ${
-                motionLevel === level.id
-                  ? 'bg-primary/10 border border-primary/30'
-                  : 'bg-[hsl(var(--surface-secondary)/0.2)] hover:bg-[hsl(var(--surface-secondary)/0.4)]'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                motionLevel === level.id ? 'bg-primary/20' : 'bg-[hsl(var(--surface-secondary))]'
-              }`}>
-                <level.icon size={18} className={motionLevel === level.id ? 'text-primary' : 'text-muted-foreground'} />
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-sm font-medium text-foreground">{level.name}</div>
-                <div className="text-xs text-muted-foreground">{level.desc}</div>
-              </div>
-              {motionLevel === level.id && (
-                <motion.div 
-                  className="w-5 h-5 rounded-full bg-primary flex items-center justify-center"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 500 }}
-                >
-                  <CheckCircle2 size={12} className="text-white" />
-                </motion.div>
-              )}
-            </motion.button>
-          ))}
-        </div>
-      </motion.div>
-
-      <motion.div 
-        className="glass rounded-xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
-        <h4 className="text-sm font-semibold text-foreground mb-4">交互设置</h4>
-        <div className="space-y-4">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="flex justify-between text-xs mb-3">
-              <span className="text-muted-foreground">过渡速度</span>
-              <span className="text-foreground font-medium">{transitionSpeeds.find(s => s.id === transitionSpeed)?.name}</span>
-            </div>
-            <div className="flex gap-2">
-              {transitionSpeeds.map((speed) => (
-                <button
-                  key={speed.id}
-                  onClick={() => setTransitionSpeed(speed.id)}
-                  className={`flex-1 h-9 rounded-lg text-xs font-medium transition-all ${
-                    transitionSpeed === speed.id
-                      ? 'bg-primary/10 text-primary border border-primary/30'
-                      : 'bg-[hsl(var(--surface-secondary)/0.3)] text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {speed.name}
-                </button>
-              ))}
-            </div>
+            <h4 className="text-sm font-semibold text-foreground">动效强度</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">控制全局动画的强烈程度</p>
           </div>
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Zap size={14} className="text-primary" />
+          </div>
+        </div>
 
-          <div className="flex items-center justify-between p-4 rounded-xl bg-[hsl(var(--surface-secondary)/0.2)]">
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {levels.map((level) => {
+            const Icon = level.icon
+            const active = settings.motion.level === level.id
+            return (
+              <motion.button
+                key={level.id}
+                onClick={() => update('motion', 'level', level.id)}
+                whileHover={{ y: -3 }}
+                whileTap={{ scale: 0.97 }}
+                className={`relative p-4 rounded-xl border transition-all ${
+                  active
+                    ? 'bg-primary/10 border-primary/40'
+                    : 'bg-[hsl(var(--surface-secondary)/0.3)] border-transparent hover:border-primary/20'
+                }`}
+              >
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center mx-auto mb-2 ${
+                  active ? 'bg-primary/20' : 'bg-[hsl(var(--surface-secondary))]'
+                }`}>
+                  <Icon size={16} className={active ? 'text-primary' : 'text-muted-foreground'} />
+                </div>
+                <div className={`text-xs font-medium text-center ${active ? 'text-primary' : 'text-foreground'}`}>{level.name}</div>
+                <div className="text-[10px] text-muted-foreground text-center mt-0.5">{level.desc}</div>
+                {active && (
+                  <motion.div
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary flex items-center justify-center"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 500 }}
+                  >
+                    <CheckCircle2 size={10} className="text-white" />
+                  </motion.div>
+                )}
+              </motion.button>
+            )
+          })}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[hsl(var(--surface-secondary)/0.2)]">
             <div>
-              <div className="text-sm text-foreground">悬停动效</div>
-              <div className="text-xs text-muted-foreground">按钮与卡片的交互反馈</div>
+              <div className="text-sm text-foreground">加载动画</div>
+              <div className="text-xs text-muted-foreground">数据加载时的过渡动画</div>
             </div>
             <button
-              onClick={() => setHoverMotion(!hoverMotion)}
-              className={`relative w-12 h-6 rounded-full transition-all ${
-                hoverMotion ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'
-              }`}
+              onClick={() => update('motion', 'loadingAnimation', !settings.motion.loadingAnimation)}
+              className={`relative w-12 h-6 rounded-full transition-all ${settings.motion.loadingAnimation ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'}`}
             >
-              <motion.div 
+              <motion.div
                 className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-lg"
-                animate={{ left: hoverMotion ? '28px' : '4px' }}
+                animate={{ left: settings.motion.loadingAnimation ? '28px' : '4px' }}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[hsl(var(--surface-secondary)/0.2)]">
+            <div>
+              <div className="text-sm text-foreground">页面切换动画</div>
+              <div className="text-xs text-muted-foreground">路由切换时的过渡效果</div>
+            </div>
+            <button
+              onClick={() => update('motion', 'pageTransition', !settings.motion.pageTransition)}
+              className={`relative w-12 h-6 rounded-full transition-all ${settings.motion.pageTransition ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'}`}
+            >
+              <motion.div
+                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-lg"
+                animate={{ left: settings.motion.pageTransition ? '28px' : '4px' }}
                 transition={{ type: 'spring', stiffness: 500, damping: 30 }}
               />
             </button>
           </div>
         </div>
-      </motion.div>
-    </div>
-  )
 
-  const renderSystemBlur = () => (
-    <div className="space-y-6">
-      <motion.div 
+        <div className="mt-4 pt-4 border-t border-[hsl(var(--border))/30]">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs text-muted-foreground">实时预览（倍率 {scale}x）</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={() => setMotionPreviewKey(k => k + 1)}
+            >
+              <Sparkles size={12} />
+              播放预览
+            </Button>
+          </div>
+          <div className="h-24 rounded-xl bg-[hsl(var(--surface-secondary)/0.4)] flex items-center justify-center overflow-hidden relative">
+            <div
+              className="absolute inset-0 opacity-30"
+              style={{
+                backgroundImage: 'radial-gradient(circle at 25% 25%, hsl(var(--primary)) 0%, transparent 50%), radial-gradient(circle at 75% 75%, hsl(var(--accent)) 0%, transparent 50%)',
+              }}
+            />
+            <motion.div
+              key={motionPreviewKey}
+              className="relative w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent shadow-lg"
+              initial={{ scale: 0.3, rotate: 0, opacity: 0 }}
+              animate={{ scale: 1, rotate: 360, opacity: 1 }}
+              transition={{ duration: 1.2 * scale, ease: 'easeInOut' }}
+            />
+          </div>
+        </div>
+      </motion.div>
+    )
+  }
+
+  const renderSystemBlur = () => {
+    const blurPxValues = [0, 4, 10, 18, 28] as const
+    const previewLevels = [1, 2, 3] as const
+    const enabled = settings.blur.enabled && settings.blur.level > 0
+
+    return (
+      <motion.div
         className="glass-strong rounded-2xl p-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
       >
-        <h4 className="text-sm font-semibold text-foreground mb-4">背景模糊</h4>
-        <div className="space-y-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="flex justify-between text-xs mb-3">
-              <span className="text-muted-foreground">模糊强度</span>
-              <span className="text-foreground font-medium">{blurLevels.find(b => b.id === blurLevel)?.name}</span>
+            <h4 className="text-sm font-semibold text-foreground">背景模糊</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">控制界面元素的毛玻璃效果</p>
+          </div>
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Waves size={14} className="text-primary" />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[hsl(var(--surface-secondary)/0.2)]">
+            <div>
+              <div className="text-sm text-foreground">启用背景模糊</div>
+              <div className="text-xs text-muted-foreground">关闭后所有模糊效果将被禁用</div>
             </div>
-            <div className="flex gap-2">
-              {blurLevels.map((level) => (
-                <button
-                  key={level.id}
-                  onClick={() => setBlurLevel(level.id)}
-                  className={`flex-1 h-9 rounded-lg text-xs font-medium transition-all ${
-                    blurLevel === level.id
-                      ? 'bg-primary/10 text-primary border border-primary/30'
-                      : 'bg-[hsl(var(--surface-secondary)/0.3)] text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {level.name}
-                </button>
-              ))}
+            <button
+              onClick={() => update('blur', 'enabled', !settings.blur.enabled)}
+              className={`relative w-12 h-6 rounded-full transition-all ${settings.blur.enabled ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'}`}
+            >
+              <motion.div
+                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-lg"
+                animate={{ left: settings.blur.enabled ? '28px' : '4px' }}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
+            </button>
+          </div>
+
+          <div>
+            <div className="flex justify-between text-xs mb-2">
+              <span className="text-muted-foreground">模糊强度</span>
+              <span className="text-foreground font-medium">{blurPxValues[settings.blur.level]}px</span>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {blurPxValues.map((px, idx) => {
+                const level = idx as 0 | 1 | 2 | 3 | 4
+                const active = settings.blur.level === level
+                return (
+                  <button
+                    key={level}
+                    onClick={() => update('blur', 'level', level)}
+                    disabled={!settings.blur.enabled}
+                    className={`h-9 rounded-lg text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                      active
+                        ? 'bg-primary/10 text-primary border border-primary/30'
+                        : 'bg-[hsl(var(--surface-secondary)/0.3)] text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {px}px
+                  </button>
+                )
+              })}
             </div>
           </div>
 
           <div className="p-4 rounded-xl bg-[hsl(var(--surface-secondary)/0.2)]">
-            <div className="text-xs text-muted-foreground mb-3">实时预览</div>
-            <div className="flex gap-2">
-              {['low', 'medium', 'high'].map((level) => (
-                <div
-                  key={level}
-                  className="flex-1 h-16 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center"
-                  style={{ backdropFilter: `blur(${level === 'low' ? '4px' : level === 'medium' ? '12px' : '20px'})` }}
-                >
-                  <span className="text-[10px] text-white/60">{level === 'low' ? '4px' : level === 'medium' ? '12px' : '20px'}</span>
+            <div className="text-xs text-muted-foreground mb-3">实时预览对比</div>
+            <div
+              className="relative h-28 rounded-lg overflow-hidden"
+              style={{
+                backgroundImage:
+                  'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 50%, hsl(280 70% 50%) 100%)',
+              }}
+            >
+              <div className="absolute inset-0 flex items-center justify-center text-white/40 text-xs">
+                模糊背景层
+              </div>
+              <div className="absolute inset-0 flex gap-2 p-3">
+                {previewLevels.map((lvl) => {
+                  const px = blurPxValues[lvl]
+                  return (
+                    <div
+                      key={lvl}
+                      className="flex-1 rounded-lg border border-white/20 flex flex-col items-center justify-center"
+                      style={{
+                        backdropFilter: enabled ? `blur(${px}px)` : 'none',
+                        backgroundColor: enabled ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.4)',
+                      }}
+                    >
+                      <span className="text-[10px] text-white/80 font-medium">
+                        {enabled ? `${px}px` : '无模糊'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            {!enabled && (
+              <div className="text-[10px] text-muted-foreground mt-2 text-center">
+                模糊已关闭，预览方块显示为纯色
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    )
+  }
+
+  const renderSystemNotifications = () => {
+    const notifApps = [
+      { key: 'aiGenerate' as const, label: 'AI 生成完成', desc: 'AI 图像生成完成时通知', icon: Sparkles },
+      { key: 'exportReady' as const, label: '导出就绪', desc: '导出文件准备就绪时通知', icon: Save },
+      { key: 'systemUpdate' as const, label: '系统更新', desc: '系统有更新时通知', icon: BellRing },
+      { key: 'figmaSync' as const, label: 'Figma 同步', desc: 'Figma 设计稿同步时通知', icon: Layout },
+    ]
+    const notifStyles = [
+      { id: 'banner' as const, name: '横幅', desc: '顶部横幅展示' },
+      { id: 'alert' as const, name: '弹窗', desc: '居中弹窗提示' },
+      { id: 'silent' as const, name: '静默', desc: '不显示通知' },
+    ]
+    const notifSounds = [
+      { id: 'none' as const, name: '无', icon: VolumeX },
+      { id: 'default' as const, name: '默认', icon: Volume2 },
+      { id: 'subtle' as const, name: '轻微', icon: Volume2 },
+      { id: 'glass' as const, name: '玻璃', icon: Volume2 },
+    ]
+
+    const currentSound = notifSounds.find(s => s.id === settings.notifications.sound) || notifSounds[0]
+    const SoundIcon = currentSound.icon
+
+    const handlePreviewNotification = () => {
+      // 通过真实的全局通知系统弹出（受 notifications 设置控制）
+      notify({ app: 'aiGenerate', title: '示例通知', body: `样式: ${settings.notifications.style} | 持续: ${settings.notifications.bannerDuration}s` })
+      // 兼容旧的本地预览（用于 silent 模式下的提示）
+      setPreviewNotification(false)
+      requestAnimationFrame(() => setPreviewNotification(true))
+    }
+
+    return (
+      <motion.div
+        className="glass-strong rounded-2xl p-6 relative overflow-visible"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.4, delay: 0.2 }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">通知管理</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">控制通知的显示与提醒方式</p>
+          </div>
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Bell size={14} className="text-primary" />
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {previewNotification && settings.notifications.style !== 'silent' && (
+            <motion.div
+              className="absolute left-6 right-6 top-2 z-20"
+              initial={{ opacity: 0, y: -30 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -30 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            >
+              <div className="rounded-xl bg-primary/90 backdrop-blur-md p-3 shadow-xl flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+                  <BellRing size={14} className="text-white" />
                 </div>
+                <div className="flex-1 text-white">
+                  <div className="text-xs font-medium">示例通知</div>
+                  <div className="text-[10px] opacity-80">
+                    {settings.notifications.style === 'alert' ? '弹窗样式' : '横幅样式'} · 持续 {settings.notifications.bannerDuration}s
+                  </div>
+                </div>
+                <SoundIcon size={12} className="text-white/70" />
+              </div>
+            </motion.div>
+          )}
+          {previewNotification && settings.notifications.style === 'silent' && (
+            <motion.div
+              className="absolute left-6 right-6 top-2 z-20"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="rounded-xl bg-[hsl(var(--surface-secondary)/0.6)] p-3 text-center text-xs text-muted-foreground">
+                静默模式 - 通知不会显示
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="space-y-4 mt-2">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[hsl(var(--surface-secondary)/0.2)]">
+            <div>
+              <div className="text-sm text-foreground">启用通知</div>
+              <div className="text-xs text-muted-foreground">关闭后所有通知将被禁用</div>
+            </div>
+            <button
+              onClick={() => update('notifications', 'enabled', !settings.notifications.enabled)}
+              className={`relative w-12 h-6 rounded-full transition-all ${settings.notifications.enabled ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'}`}
+            >
+              <motion.div
+                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-lg"
+                animate={{ left: settings.notifications.enabled ? '28px' : '4px' }}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
+            </button>
+          </div>
+
+          <div>
+            <div className="text-xs text-muted-foreground mb-2">应用通知</div>
+            <div className="space-y-2">
+              {notifApps.map((app) => {
+                const Icon = app.icon
+                const active = settings.notifications.apps[app.key]
+                return (
+                  <div
+                    key={app.key}
+                    className="flex items-center justify-between p-2.5 rounded-lg bg-[hsl(var(--surface-secondary)/0.2)]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${active ? 'bg-primary/10' : 'bg-[hsl(var(--surface-secondary))]'}`}>
+                        <Icon size={12} className={active ? 'text-primary' : 'text-muted-foreground'} />
+                      </div>
+                      <div>
+                        <div className="text-sm text-foreground">{app.label}</div>
+                        <div className="text-[10px] text-muted-foreground">{app.desc}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => update('notifications', 'apps', { ...settings.notifications.apps, [app.key]: !active })}
+                      className={`relative w-10 h-5 rounded-full transition-all ${active ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'}`}
+                    >
+                      <motion.div
+                        className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-lg"
+                        animate={{ left: active ? '20px' : '2px' }}
+                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                      />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex justify-between text-xs mb-2">
+              <span className="text-muted-foreground">显示样式</span>
+              <span className="text-foreground font-medium">{notifStyles.find(s => s.id === settings.notifications.style)?.name}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {notifStyles.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => update('notifications', 'style', s.id)}
+                  className={`h-9 rounded-lg text-xs font-medium transition-all ${
+                    settings.notifications.style === s.id
+                      ? 'bg-primary/10 text-primary border border-primary/30'
+                      : 'bg-[hsl(var(--surface-secondary)/0.3)] text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {s.name}
+                </button>
               ))}
             </div>
           </div>
-        </div>
-      </motion.div>
 
-      <motion.div 
-        className="glass rounded-xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
-        <h4 className="text-sm font-semibold text-foreground mb-4">玻璃特效</h4>
-        <div className="flex items-center justify-between p-3 rounded-lg bg-[hsl(var(--surface-secondary)/0.2)]">
-          <div className="flex items-center gap-3">
-            <Contrast size={14} className="text-primary" />
-            <span className="text-sm text-foreground">增强透明效果</span>
+          <div>
+            <div className="flex justify-between text-xs mb-2">
+              <span className="text-muted-foreground">声音提醒</span>
+              <span className="text-foreground font-medium flex items-center gap-1">
+                <SoundIcon size={10} />
+                {currentSound.name}
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {notifSounds.map((s) => {
+                const Icon = s.icon
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => update('notifications', 'sound', s.id)}
+                    className={`h-9 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
+                      settings.notifications.sound === s.id
+                        ? 'bg-primary/10 text-primary border border-primary/30'
+                        : 'bg-[hsl(var(--surface-secondary)/0.3)] text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon size={10} />
+                    {s.name}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-          <button
-            className="relative w-10 h-5 rounded-full bg-primary transition-all"
+
+          <div>
+            <div className="flex justify-between text-xs mb-2">
+              <span className="text-muted-foreground">横幅持续时间</span>
+              <span className="text-foreground font-medium">{settings.notifications.bannerDuration}s</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={15}
+              value={settings.notifications.bannerDuration}
+              onChange={(e) => update('notifications', 'bannerDuration', Number(e.target.value))}
+              className="w-full h-2 rounded-full appearance-none cursor-pointer bg-[hsl(var(--surface-secondary))] accent-primary"
+            />
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-8 text-xs gap-1.5"
+            onClick={handlePreviewNotification}
           >
-            <motion.div className="absolute top-0.5 left-[18px] w-4 h-4 rounded-full bg-white shadow" />
-          </button>
+            <BellRing size={12} />
+            预览示例通知
+          </Button>
         </div>
       </motion.div>
-    </div>
-  )
-
-  const renderSystemPerformance = () => (
-    <div className="space-y-6">
-      <motion.div 
-        className="glass-strong rounded-2xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-      >
-        <h4 className="text-sm font-semibold text-foreground mb-4">性能模式</h4>
-        <div className="space-y-3">
-          {[
-            { icon: Gauge, label: 'GPU 加速', desc: '使用 GPU 硬件加速渲染', active: true, toggle: false },
-            { icon: Activity, label: '高质量渲染', desc: '高质量像素渲染引擎', active: true, toggle: false },
-            { icon: ZapOff, label: '减少动效', desc: '减少界面动画效果', active: reduceMotion, toggle: true },
-          ].map((item) => (
-            <div 
-              key={item.label}
-              className="flex items-center justify-between p-4 rounded-lg bg-[hsl(var(--surface-secondary)/0.2)]"
-            >
-              <div className="flex items-center gap-3 flex-1">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                  item.active ? 'bg-primary/10' : 'bg-[hsl(var(--surface-secondary))]'
-                }`}>
-                  <item.icon size={14} className={item.active ? 'text-primary' : 'text-muted-foreground'} />
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-foreground">{item.label}</div>
-                  <div className="text-xs text-muted-foreground">{item.desc}</div>
-                </div>
-              </div>
-              {item.toggle ? (
-                <button
-                  onClick={() => setReduceMotion(!reduceMotion)}
-                  className={`relative w-10 h-5 rounded-full transition-all ${
-                    item.active ? 'bg-primary' : 'bg-[hsl(var(--surface-secondary))]'
-                  }`}
-                >
-                  <motion.div 
-                    className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow"
-                    animate={{ left: item.active ? '20px' : '2px' }}
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                  />
-                </button>
-              ) : (
-                <CheckCircle2 size={14} className="text-emerald-400" />
-              )}
-            </div>
-          ))}
-        </div>
-      </motion.div>
-    </div>
-  )
-
-  const renderSystemAccessibility = () => (
-    <div className="space-y-6">
-      <motion.div 
-        className="glass-strong rounded-2xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-      >
-        <h4 className="text-sm font-semibold text-foreground mb-4">通知管理</h4>
-        <div className="space-y-3">
-          {[
-            { icon: Bell, label: 'AI 生成完成', desc: 'AI 生成完成时通知', active: true },
-            { icon: Bell, label: '导出就绪', desc: '导出就绪时通知', active: true },
-            { icon: BellOff, label: '系统更新', desc: '系统更新通知', active: false },
-          ].map((item) => (
-            <div 
-              key={item.label}
-              className="flex items-center justify-between p-3 rounded-lg bg-[hsl(var(--surface-secondary)/0.2)]"
-            >
-              <div className="flex items-center gap-3 flex-1">
-                <item.icon size={14} className={item.active ? 'text-primary' : 'text-muted-foreground'} />
-                <div>
-                  <div className="text-sm text-foreground">{item.label}</div>
-                  <div className="text-xs text-muted-foreground">{item.desc}</div>
-                </div>
-              </div>
-              {item.active ? (
-                <CheckCircle2 size={14} className="text-emerald-400" />
-              ) : (
-                <Circle size={14} className="text-muted-foreground" />
-              )}
-            </div>
-          ))}
-        </div>
-      </motion.div>
-
-      <motion.div 
-        className="glass rounded-xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
-        <h4 className="text-sm font-semibold text-foreground mb-4">显示偏好</h4>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-[hsl(var(--surface-secondary)/0.2)]">
-            <div className="flex items-center gap-3">
-              <Contrast size={14} className="text-primary" />
-              <span className="text-sm text-foreground">高对比度模式</span>
-            </div>
-            <button className="relative w-10 h-5 rounded-full bg-[hsl(var(--surface-secondary))]">
-              <motion.div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow" />
-            </button>
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-lg bg-[hsl(var(--surface-secondary)/0.2)]">
-            <div className="flex items-center gap-3">
-              <Monitor size={14} className="text-primary" />
-              <span className="text-sm text-foreground">放大字体模式</span>
-            </div>
-            <button className="relative w-10 h-5 rounded-full bg-[hsl(var(--surface-secondary))]">
-              <motion.div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow" />
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  )
+    )
+  }
 
   const renderSystemPanel = () => (
     <div className="space-y-6">
       {renderSystemMotion()}
       {renderSystemBlur()}
-      {renderSystemPerformance()}
-      {renderSystemAccessibility()}
+      {renderSystemNotifications()}
     </div>
   )
 

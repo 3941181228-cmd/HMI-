@@ -36,7 +36,7 @@ const sections: SidebarSection[] = [
     id: 'ai-gen',
     icon: <Sparkles size={16} />,
     title: 'AI 生成',
-    items: ['AI 生成 HMI', 'AI 生成壁纸'],
+    items: ['AI 生成 HMI', 'AI 生成壁纸', '3D 模型生成'],
     navigateTo: 'generate',
   },
   {
@@ -90,13 +90,14 @@ interface SidebarProps {
 
 // Map HMI edit item names to sub-modes
 const editItemMap: Record<string, string> = {
-  'PNG 转可编辑': 'edit:png2edit',
+  'PNG 生成 SVG': 'edit:png2svg',
   '文本提取': 'edit:text_extract',
 }
 
 const genItemMap: Record<string, string> = {
   'AI 生成 HMI': 'generate',
   'AI 生成壁纸': 'ai-wallpaper',
+  '3D 模型生成': '3d-model',
 }
 
 const themeItemMap: Record<string, string> = {

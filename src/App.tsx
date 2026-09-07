@@ -1,14 +1,31 @@
 import { useState, useCallback, useEffect } from 'react'
+import { MotionConfig } from 'framer-motion'
 import { useParams, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import TopNavigation from './components/TopNavigation'
 import Sidebar from './components/Sidebar'
 import Workspace from './components/Workspace'
 import SettingsCenter from './components/SettingsCenter'
 import WorkspaceSettingsModal, { type WorkspaceSettings } from './components/WorkspaceSettingsModal'
+import NotificationContainer from './components/NotificationContainer'
 import { useHistory } from './hooks/useHistory'
 import { useTheme } from './hooks/useTheme'
+import { SystemSettingsProvider, useSystemSettings } from './contexts/SystemSettingsContext'
 
-type TabId = 'dashboard' | 'preview' | 'generate' | 'edit' | 'theme' | 'check' | 'export' | 'wallpaper' | 'ai-wallpaper'
+/** 包裹 MotionConfig 让动效强度全局生效 */
+function MotionWrapper({ children }: { children: React.ReactNode }) {
+  const { motionScale } = useSystemSettings()
+  return (
+    <MotionConfig
+      transition={{ duration: 0.3 * motionScale, ease: 'easeOut' }}
+      // 通过 reducedMotion 让 minimal 自动减少动效
+      reducedMotion={motionScale < 0.5 ? 'always' : 'never'}
+    >
+      {children}
+    </MotionConfig>
+  )
+}
+
+type TabId = 'dashboard' | 'preview' | 'generate' | 'edit' | 'theme' | 'check' | 'export' | 'wallpaper' | 'ai-wallpaper' | '3d-model'
 
 function App() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -18,7 +35,7 @@ function App() {
   const { activeThemeId, applyTheme } = useTheme()
   const [activeTab, setActiveTab] = useState<TabId>('generate')
   const [activeSection, setActiveSection] = useState<string>('')
-  const [editSubMode, setEditSubMode] = useState<'png2edit' | 'text_extract'>('png2edit')
+  const [editSubMode, setEditSubMode] = useState<'png2svg' | 'text_extract'>('png2svg')
   const [themePreset, setThemePreset] = useState<string | null>(null)
   const [wallpaperSub, setWallpaperSub] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -90,7 +107,7 @@ function App() {
         setActiveSection(sub || 'full')
       } else if (tab === 'edit') {
         setActiveTab('edit')
-        setEditSubMode(sub as 'png2edit' | 'text_extract')
+        setEditSubMode(sub as 'png2svg' | 'text_extract')
         setActiveSection('hmi-edit')
       } else if (tab === 'theme') {
         setActiveTab('theme')
@@ -112,6 +129,9 @@ function App() {
       } else if (tab === 'ai-wallpaper') {
         setActiveTab('ai-wallpaper')
         setActiveSection('ai-gen')
+      } else if (tab === '3d-model') {
+        setActiveTab('3d-model')
+        setActiveSection('ai-gen')
       } else {
         setActiveTab(tab as TabId)
         setActiveSection('ai-gen')
@@ -132,9 +152,12 @@ function App() {
       } else if (target === 'ai-wallpaper') {
         setActiveTab('ai-wallpaper')
         setActiveSection('ai-gen')
+      } else if (target === '3d-model') {
+        setActiveTab('3d-model')
+        setActiveSection('ai-gen')
       } else if (target === 'check') {
         setActiveTab('check')
-        setActiveSection('check')
+        setActiveSection('full')
       } else if (target === 'export') {
         setActiveTab('export')
         setActiveSection('export')
@@ -152,14 +175,14 @@ function App() {
     setActiveTab(tab)
     if (tab === 'dashboard') {
       setActiveSection('history')
-    } else if (tab === 'generate' || tab === 'ai-wallpaper') {
+    } else if (tab === 'generate' || tab === 'ai-wallpaper' || tab === '3d-model') {
       setActiveSection('ai-gen')
     } else if (tab === 'edit') {
       setActiveSection('hmi-edit')
     } else if (tab === 'wallpaper') {
       setActiveSection('wallpaper')
     } else if (tab === 'check') {
-      setActiveSection('check')
+      setActiveSection('full')
     } else if (tab === 'export') {
       setActiveSection('export')
     } else if (tab === 'theme') {
@@ -168,40 +191,45 @@ function App() {
   }, [])
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
-      <TopNavigation
-        autoSave={workspaceSettings.autoSave}
-        realTimeSync={workspaceSettings.realTimeSync}
-        onOpenWorkspaceSettings={() => setWorkspaceSettingsOpen(true)}
-      />
-      <div className="flex-1 flex overflow-hidden">
-        <Sidebar
-          onNavigate={handleNavigate}
-          activeSection={activeSection}
-          historyRecords={records}
-          onClearHistory={clearHistory}
-        />
-        <Workspace
-          activeTab={activeTab}
-          activeSection={activeSection}
-          onTabChange={handleTabChange}
-          onAddHistory={addRecord}
-          onDeleteRecords={deleteRecords}
-          editSubModeProp={editSubMode}
-          themePresetProp={themePreset}
-          wallpaperSubProp={wallpaperSub}
-          onNavigate={handleNavigate}
-          historyRecords={records}
-        />
-      </div>
-      <SettingsCenter open={settingsOpen} onClose={() => setSettingsOpen(false)} activeTab={settingsTab} activeThemeId={activeThemeId} applyTheme={applyTheme} />
-      <WorkspaceSettingsModal
-        open={workspaceSettingsOpen}
-        onClose={() => setWorkspaceSettingsOpen(false)}
-        settings={workspaceSettings}
-        onSettingsChange={setWorkspaceSettings}
-      />
-    </div>
+    <SystemSettingsProvider>
+      <MotionWrapper>
+        <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
+          <TopNavigation
+            autoSave={workspaceSettings.autoSave}
+            onOpenWorkspaceSettings={() => setWorkspaceSettingsOpen(true)}
+          />
+          <div className="flex-1 flex overflow-hidden">
+            <Sidebar
+              onNavigate={handleNavigate}
+              activeSection={activeSection}
+              historyRecords={records}
+              onClearHistory={clearHistory}
+            />
+            <Workspace
+              activeTab={activeTab}
+              activeSection={activeSection}
+              onTabChange={handleTabChange}
+              onAddHistory={addRecord}
+              onDeleteRecords={deleteRecords}
+              editSubModeProp={editSubMode}
+              themePresetProp={themePreset}
+              wallpaperSubProp={wallpaperSub}
+              onNavigate={handleNavigate}
+              historyRecords={records}
+            />
+          </div>
+          <SettingsCenter open={settingsOpen} onClose={() => setSettingsOpen(false)} activeTab={settingsTab} activeThemeId={activeThemeId} applyTheme={applyTheme} />
+          <WorkspaceSettingsModal
+            open={workspaceSettingsOpen}
+            onClose={() => setWorkspaceSettingsOpen(false)}
+            settings={workspaceSettings}
+            onSettingsChange={setWorkspaceSettings}
+          />
+          {/* 全局通知容器：受 notifications 设置控制 */}
+          <NotificationContainer />
+        </div>
+      </MotionWrapper>
+    </SystemSettingsProvider>
   )
 }
 

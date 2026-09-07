@@ -54,6 +54,16 @@
 
     /* Radius */
     --radius: 0.75rem;
+
+    /* === 系统偏好设置全局变量（由 SystemSettingsContext 动态注入） === */
+    /* 动效 */
+    --app-motion-scale: 1;             /* 动效持续时间倍率: 0.4 / 1 / 1.6 */
+    --app-animation-enabled: 1;        /* 加载动画开关: 1 / 0 */
+    --app-page-transition: 1;          /* 页面切换动画: 1 / 0 */
+    /* 模糊 */
+    --app-blur: 10px;                  /* 全局背景模糊值 */
+    /* 通知 */
+    --app-notification-duration: 5s;   /* 横幅持续时间 */
   }
 }
 
@@ -98,26 +108,62 @@
 }
 
 @layer components {
-  /* Glassmorphism base */
+  /* Glassmorphism base - 响应全局模糊设置 */
   .glass {
     background: hsl(var(--surface) / 0.6);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(calc(var(--app-blur, 10px) * 1.2));
+    -webkit-backdrop-filter: blur(calc(var(--app-blur, 10px) * 1.2));
     border: 1px solid hsl(var(--foreground) / 0.06);
   }
 
   .glass-strong {
     background: hsl(var(--surface) / 0.8);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(calc(var(--app-blur, 10px) * 1.4));
+    -webkit-backdrop-filter: blur(calc(var(--app-blur, 10px) * 1.4));
     border: 1px solid hsl(var(--foreground) / 0.08);
   }
 
   .glass-subtle {
     background: hsl(var(--surface) / 0.4);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(calc(var(--app-blur, 10px) * 0.8));
+    -webkit-backdrop-filter: blur(calc(var(--app-blur, 10px) * 0.8));
     border: 1px solid hsl(var(--foreground) / 0.04);
+  }
+
+  /* 当模糊为 0 时，关闭所有 backdrop-filter（性能优化） */
+  :root[data-blur-disabled='1'] .glass,
+  :root[data-blur-disabled='1'] .glass-strong,
+  :root[data-blur-disabled='1'] .glass-subtle {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* === 动效强度响应 === */
+  /* 注意：不要用 * { transition-duration: !important } 这种暴力覆盖，
+     它会破坏 framer-motion 的内联 transitionDuration。改用 MotionConfig 全局控制。 */
+
+  /* 减弱动效模式：仅对 Tailwind 的 utility class 生效（保留 framer-motion 内联样式优先级） */
+  :root[data-motion-level='minimal'] .transition,
+  :root[data-motion-level='minimal'] .transition-all,
+  :root[data-motion-level='minimal'] .transition-colors,
+  :root[data-motion-level='minimal'] .transition-opacity,
+  :root[data-motion-level='minimal'] .transition-transform {
+    transition-duration: 100ms !important;
+  }
+  :root[data-motion-level='premium'] .transition,
+  :root[data-motion-level='premium'] .transition-all,
+  :root[data-motion-level='premium'] .transition-colors,
+  :root[data-motion-level='premium'] .transition-opacity,
+  :root[data-motion-level='premium'] .transition-transform {
+    transition-duration: 600ms !important;
+  }
+
+  /* 当加载动画关闭时，禁用所有 keyframe animation（不影响 transition） */
+  :root[data-animation-disabled='1'] *,
+  :root[data-animation-disabled='1'] *::before,
+  :root[data-animation-disabled='1'] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
   }
 
   /* Glow effects */

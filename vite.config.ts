@@ -32,15 +32,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/api/figma': {
-          target: 'https://api.figma.com',
+        '/api': {
+          target: 'http://localhost:3000',
           changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/api\/figma/, '/v1'),
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq) => {
-              proxyReq.setHeader('X-Figma-Token', env.FIGMA_API_TOKEN || 'figd_wxgzK5DKkvwd8RjL1jEqXPflDkuCr_UUBq5YNxCR');
-            });
-          },
         },
       },
     },
