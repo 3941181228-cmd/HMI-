@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 59845)
+Total output lines: 4912
+
 import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -283,8 +286,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   // 导出错误提示
   const [exportErrorMessage, setExportErrorMessage] = useState<string | null>(null)
   
-  // Figma API Configuration - 使用用户在设置中配置的 Token
-  const FIGMA_API_TOKEN = getStoredFigmaToken()
   const FIGMA_API_BASE_URL = '/api/figma'  // 通过 Vite 代理访问 Figma API
 
   // Figma import state
@@ -361,11 +362,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     
     // 每次调用时重新获取最新的token
     const currentToken = getStoredFigmaToken()
-    if (!currentToken) {
-      alert('请先在设置中配置 Figma Personal Access Token')
-      setIsConnecting(false)
-      return
-    }
     
     setIsConnecting(true)
     setAnalyzingStep(0)
@@ -531,10 +527,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   // 异步加载预览图（渐进式加载，逐帧更新）
   const loadFramePreviewsAsync = async (fileKey: string, frames: string[], nodeIds: Record<string, string>) => {
     const token = getStoredFigmaToken()
-    if (!token) {
-      console.warn('Figma Token未配置，无法加载预览图')
-      return
-    }
 
     // 前置诊断：检查 nodeIds 是否完整
     const missingNodeIds = frames.filter(f => !nodeIds[f])
@@ -542,7 +534,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       console.error('预览加载失败：以下 Frame 缺少 nodeId（可能数据未完整加载）:', missingNodeIds)
     }
 
-    console.log('开始加载预览图:', { fileKey, frameCount: frames.length, token: token.slice(0, 8) + '...' })
+    console.log('开始加载预览图:', { fileKey, frameCount: frames.length })
 
     setPreviewsLoading(true)
     setPreviewErrors({})
@@ -608,11 +600,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const loadExportAssetsAsync = async (fileKey: string, exportNodes: Array<{ id: string; name: string; format: string }>) => {
     setAssetsLoading(true)
     const token = getStoredFigmaToken()
-    if (!token) {
-      console.warn('Figma Token未配置，无法加载切图')
-      setAssetsLoading(false)
-      return
-    }
     
     const assets: Array<{ id: string; name: string; url: string; format: string }> = []
     const batchSize = 50
@@ -736,7 +723,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     if (!fileKey || !nodeId) return
     
     const token = getStoredFigmaToken()
-    if (!token) return
     
     // 清除该frame的错误状态
     setPreviewErrors(prev => {
@@ -767,7 +753,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const refreshExportAssets = () => {
     if (figmaFileInfo?.fileKey && figmaConnected) {
       const token = getStoredFigmaToken()
-      if (!token) return
       
       // 重新扫描切图节点并加载
       setFigmaExportAssets([])
@@ -814,7 +799,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     if (!fileKey || !asset) return
     
     const token = getStoredFigmaToken()
-    if (!token) return
     
     // 清除错误状态
     setAssetErrors(prev => {
@@ -956,10 +940,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       return
     }
     const currentToken = getStoredFigmaToken()
-    if (!currentToken) {
-      setExportErrorMessage('Figma Token 未配置或权限不足，请在设置中添加具有「File content」读取权限的 Personal Access Token。')
-      return
-    }
 
     // 2. 准备配置参数（使用默认配置）
     const { scale, quality, outputFormat, keepTransparency } = PNG_EXPORT_DEFAULTS
@@ -1386,10 +1366,6 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       try {
         // 每次调用时重新获取最新的token（避免token更新后使用旧值）
         const currentToken = getStoredFigmaToken()
-        if (!currentToken) {
-          console.warn('Figma Token未配置，使用模拟导出')
-          return generateFallbackContent(ext, filename)
-        }
         
         // 使用真实的 Figma API 获取图片
         const format = ext === 'png' ? 'png' : 'svg'
@@ -2523,692 +2499,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                                           ? 'bg-primary/10 text-primary'
                                           : 'text-foreground hover:bg-[hsl(var(--foreground)/0.04)]'
                                       }`}
-                                    >
-                                      <span className="text-xs w-5 text-center">{preset.icon}</span>
-                                      <span className="text-[11px] font-medium flex-1">{preset.ratio}</span>
-                                      {isActive && <CheckCircle2 size={10} className="text-primary" />}
-                                    </button>
-                                    {isActive && (
-                                      <div className="flex items-center gap-1 px-3 pb-2 pl-10">
-                                        {preset.resolutions.map((res) => (
-                                          <button
-                                            key={res}
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              setGenResolution(res)
-                                            }}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-150 ${
-                                              genResolution === res
-                                                ? 'bg-primary/15 text-primary border border-primary/25'
-                                                : 'bg-[hsl(var(--surface-secondary)/0.4)] text-muted-foreground border border-transparent hover:text-foreground'
-                                            }`}
-                                          >
-                                            {res}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                              <div className="border-t border-[hsl(var(--foreground)/0.06)]">
-                                <button
-                                  onClick={() => {
-                                    setGenCustomSize(true)
-                                    setSizeDropdownOpen(false)
-                                  }}
-                                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all duration-150 ${
-                                    genCustomSize
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'text-foreground hover:bg-[hsl(var(--foreground)/0.04)]'
-                                  }`}
-                                >
-                                  <span className="text-xs w-5 text-center">⚙</span>
-                                  <span className="text-[11px] font-medium flex-1">自定义尺寸</span>
-                                  {genCustomSize && <CheckCircle2 size={10} className="text-primary" />}
-                                </button>
-                                {genCustomSize && (
-                                  <div className="flex items-center gap-1.5 px-3 pb-2 pl-10">
-                                    <input
-                                      type="number"
-                                      value={genCustomWidth}
-                                      onChange={(e) => setGenCustomWidth(Math.max(256, Math.min(4096, parseInt(e.target.value) || 256)))}
-                                      className="w-16 h-6 rounded-md bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-[10px] text-foreground text-center focus:outline-none focus:border-primary/40"
-                                      min={256}
-                                      max={4096}
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                    <span className="text-[10px] text-muted-foreground">×</span>
-                                    <input
-                                      type="number"
-                                      value={genCustomHeight}
-                                      onChange={(e) => setGenCustomHeight(Math.max(256, Math.min(4096, parseInt(e.target.value) || 256)))}
-                                      className="w-16 h-6 rounded-md bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-[10px] text-foreground text-center focus:outline-none focus:border-primary/40"
-                                      min={256}
-                                      max={4096}
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                    <span className="text-[9px] text-muted-foreground/50">px</span>
-                                  </div>
-                                )}
-                              </div>
-                            </motion.div>
-                          </>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                    <span className="px-1.5 py-0.5 rounded bg-primary/5 border border-primary/10 text-primary text-[10px]">{engine === 'jimeng' ? '即梦引擎' : 'GPT 图像'}</span>
-                    {refImage && (
-                      <span className="px-1.5 py-0.5 rounded bg-primary/5 border border-primary/10 text-primary text-[10px] flex items-center gap-0.5">
-                        <ImageIcon size={8} />
-                        参考图
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    variant="glow"
-                    size="sm"
-                    onClick={handleGenerate}
-                    disabled={isGenerating || (!promptInput.trim() && !refImage)}
-                    className="gap-1.5"
-                  >
-                    {isGenerating ? (
-                      <>
-                        <motion.span
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                        >
-                          <Zap size={12} />
-                        </motion.span>
-                        生成中...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={12} />
-                        生成 HMI
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Quick Prompts */}
-              <div className="space-y-2">
-                <span className="text-xs text-muted-foreground">快捷提示词</span>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    '极简风格仪表盘',
-                    '保时捷 HMI 简约座舱',
-                    '特斯拉极简中控',
-                    '蔚来空间感 UI',
-                    '未来科技座舱',
-                    '豪华新能源界面',
-                  ].map((prompt) => (
-                    <button
-                      key={prompt}
-                      onClick={() => setPromptInput(prompt)}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] text-muted-foreground hover:text-foreground hover:border-[hsl(var(--primary)/0.2)] transition-all duration-200"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Generated Results */}
-              {generatedImages.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">
-                      生成结果 ({generatedImages.length})
-                      {isVerifyingSize && <span className="ml-2 text-primary animate-pulse">· 尺寸校验中…</span>}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-[10px] text-muted-foreground hover:text-foreground h-6"
-                      onClick={() => setGeneratedImages([])}
-                    >
-                      清空
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {generatedImages.map((img, i) => {
-                      const vr = sizeVerifyResults[img]
-                      const isMatch = vr?.verify.match
-                      const wasAdjusted = !!vr?.adjusted
-                      return (
-                        <div
-                          key={i}
-                          className="rounded-xl overflow-hidden border border-[hsl(var(--foreground)/0.06)] relative group cursor-pointer hover:border-[hsl(var(--primary)/0.2)] transition-all duration-300"
-                          style={{ aspectRatio: vr ? `${vr.verify.expected.width} / ${vr.verify.expected.height}` : '16 / 9' }}
-                        >
-                          <img
-                            src={vr?.finalUrl || img}
-                            alt={`Generated HMI ${i + 1}`}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                          />
-                          {/* 尺寸校验状态徽章 */}
-                          {vr && (
-                            <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium backdrop-blur-md border">
-                              {isMatch ? (
-                                <span className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 px-2 py-0.5 rounded-md">✓ {vr.verify.actual.width}×{vr.verify.actual.height}</span>
-                              ) : wasAdjusted ? (
-                                <span className="bg-amber-500/20 text-amber-400 border-amber-500/30 px-2 py-0.5 rounded-md" title={`原始 ${vr.verify.actual.width}×${vr.verify.actual.height} → 已调整为 ${vr.verify.expected.width}×${vr.verify.expected.height}`}>⚙ 已调整</span>
-                              ) : (
-                                <span className="bg-red-500/20 text-red-400 border-red-500/30 px-2 py-0.5 rounded-md" title={`预期 ${vr.verify.expected.width}×${vr.verify.expected.height} | 实际 ${vr.verify.actual.width}×${vr.verify.actual.height} | 偏差 ${vr.verify.deviationPercent.toFixed(1)}%`}>✗ {vr.verify.actual.width}×{vr.verify.actual.height}</span>
-                              )}
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-foreground">方案 {i + 1}</span>
-                              {vr && !isMatch && !wasAdjusted && (
-                                <Button
-                                  variant="glow"
-                                  size="sm"
-                                  className="h-6 text-[10px] gap-1"
-                                  onClick={async () => {
-                                    const preset = buildPresetSizeFromSelection()
-                                    const adj = await adjustImageToSize(img, preset)
-                                    setSizeVerifyResults(prev => ({ ...prev, [img]: { ...prev[img]!, finalUrl: adj.dataUrl, adjusted: adj } }))
-                                  }}
-                                >
-                                  <Maximize2 size={10} />
-                                  调整尺寸
-                                </Button>
-                              )}
-                              <Button
-                                variant="glow"
-                                size="sm"
-                                className="h-6 text-[10px] gap-1"
-                                onClick={() => handleDownload(vr?.finalUrl || img, i)}
-                              >
-                                <Download size={10} />
-                                下载 PNG
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {/* 尺寸对比详情卡片 */}
-                  {Object.keys(sizeVerifyResults).length > 0 && (
-                    <div className="rounded-xl border border-[hsl(var(--foreground)/0.06)] bg-[hsl(var(--surface-secondary)/0.3)] p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-foreground">尺寸校验详情</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          预期: {(() => { const p = buildPresetSizeFromSelection(); return `${p.label} ${p.width}×${p.height}`; })()}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-1.5">
-                        {Object.entries(sizeVerifyResults).map(([url, vr]) => {
-                          if (!vr) return null
-                          return (
-                            <div key={url} className="flex items-center gap-2 text-[10px]">
-                              <span className="text-muted-foreground">·</span>
-                              <span className="text-foreground font-medium">预期 {vr.verify.expected.width}×{vr.verify.expected.height}</span>
-                              <span className="text-muted-foreground">→</span>
-                              <span className={vr.verify.match ? 'text-emerald-400' : 'text-amber-400'}>
-                                实际 {vr.verify.actual.width || '?'}×{vr.verify.actual.height || '?'}
-                              </span>
-                              <span className="text-muted-foreground">
-                                {vr.verify.match ? '一致' : `偏差 ${vr.verify.deviationPercent.toFixed(1)}%${vr.adjusted ? ' (已调整)' : ''}`}
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* HMI History Records */}
-              {historyRecords.filter(r => r.category === 'hmi').length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">HMI 创作记录</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-[10px] text-muted-foreground hover:text-foreground h-6"
-                      onClick={() => onNavigate?.('dashboard')}
-                    >
-                      查看全部
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {historyRecords.filter(r => r.category === 'hmi').slice(0, 4).map((record) => (
-                      <div
-                        key={record.id}
-                        className="rounded-xl overflow-hidden border border-[hsl(var(--foreground)/0.06)] aspect-video relative group cursor-pointer hover:border-[hsl(var(--primary)/0.2)] transition-all duration-300"
-                      >
-                        {record.images[0] && (
-                          <img
-                            src={getProxyImageUrl(record.images[0])}
-                            alt={record.prompt}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                          />
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] text-foreground truncate">{record.prompt.slice(0, 25)}</p>
-                            <p className="text-[9px] text-white/50">{new Date(record.createdAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-          </motion.div>
-          )}
-
-          {activeTab === 'edit' && (
-            <motion.div
-              key="edit"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.15 }}
-              className="max-w-3xl mx-auto space-y-6"
-            >
-              <div className="flex items-start justify-between">
-                <div className="text-center space-y-2 flex-1">
-                  <div className="flex items-center justify-center gap-3">
-                    <h2 className="text-xl font-semibold text-foreground">
-                      {editSubMode === 'png2svg' ? 'PNG 生成 SVG' : '文本提取'}
-                    </h2>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditSubMode(editSubMode === 'png2svg' ? 'text_extract' : 'png2svg')}
-                      className="h-7 text-xs"
-                    >
-                      切换到 {editSubMode === 'png2svg' ? '文本提取' : 'PNG 生成 SVG'}
-                    </Button>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {editSubMode === 'png2svg'
-                      ? '上传 HMI 界面截图，AI 自动识别并生成可编辑的 SVG 组件'
-                      : '上传 HMI 界面截图，AI 自动识别并提取所有文本内容'}
-                  </p>
-                  {/* Quick Check Items */}
-                  <div className="flex flex-wrap gap-2 justify-center mt-3">
-                    {checkItemsByCategory['edit'].map((item) => (
-                      <CheckBadge
-                        key={item.id}
-                        type={item.type}
-                        label={item.label}
-                        detail={item.detail}
-                        compact
-                      />
-                    ))}
-                  </div>
-                </div>
-                <Button
-                  variant="glass"
-                  size="icon-sm"
-                  onClick={() => setSettingsOpen(true)}
-                  className="shrink-0 ml-3 mt-1"
-                  title="API 设置"
-                >
-                  <Settings2 size={14} />
-                </Button>
-              </div>
-
-              {/* Error */}
-              {editError && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/5 border border-red-500/10 text-red-400 text-xs">
-                  <AlertCircle size={14} className="shrink-0" />
-                  <span className="flex-1">{editError}</span>
-                  <button onClick={() => setEditError(null)} className="hover:text-red-300"><X size={12} /></button>
-                </div>
-              )}
-
-              {/* Image Upload */}
-              <div className="glass rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs text-primary">
-                    <Upload size={12} />
-                    <span>{editSubMode === 'png2svg' ? '上传 HMI 界面截图' : '上传需要提取文本的截图'}</span>
-                  </div>
-                  {editImage && (
-                    <button onClick={removeEditImage} className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive">
-                      <X size={10} />移除
-                    </button>
-                  )}
-                </div>
-
-                {editImage ? (
-                  <div className="relative rounded-lg overflow-hidden border border-[hsl(var(--primary)/0.15)]">
-                    <img src={editImage} alt="Upload" className="w-full max-h-64 object-contain bg-[hsl(var(--surface-secondary)/0.5)]" />
-                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent px-3 py-2 flex items-center justify-between">
-                      <span className="text-[10px] text-foreground/80 truncate">{editImageName}</span>
-                      <button onClick={() => editFileRef.current?.click()} className="text-[10px] text-primary hover:text-primary/80">更换</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => editFileRef.current?.click()}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f?.type.startsWith('image/')) { const r = new FileReader(); r.onload = (ev) => { setEditImage(ev.target?.result as string); setEditImageName(f.name) }; r.readAsDataURL(f) } }}
-                    className="flex flex-col items-center justify-center gap-3 py-10 rounded-lg border border-dashed border-[hsl(var(--foreground)/0.1)] bg-[hsl(var(--surface-secondary)/0.3)] cursor-pointer hover:border-[hsl(var(--primary)/0.25)] hover:bg-[hsl(var(--primary)/0.03)] transition-all duration-300 group"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                      <Upload size={16} className="text-primary/50 group-hover:text-primary/70" />
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-foreground/70">点击上传或拖拽图片到此处</p>
-                      <p className="text-[10px] text-muted-foreground mt-1">支持 PNG、JPG 格式的 HMI 界面截图</p>
-                    </div>
-                  </div>
-                )}
-                <input ref={editFileRef} type="file" accept="image/*" onChange={handleEditImageUpload} className="hidden" />
-              </div>
-
-              {/* Analyze Button */}
-              <Button
-                variant="glow"
-                size="sm"
-                onClick={handleAnalyze}
-                disabled={editAnalyzing || !editImage}
-                className="w-full gap-1.5"
-              >
-                {editAnalyzing ? (
-                  <>
-                    <Loader2 size={12} className="animate-spin" />
-                    生成中...
-                  </>
-                ) : editSubMode === 'png2svg' ? (
-                  <>
-                    <Layers size={12} />
-                    生成 SVG 组件
-                  </>
-                ) : (
-                  <>
-                    <FileText size={12} />
-                    开始提取文本
-                  </>
-                )}
-              </Button>
-
-              {/* Result */}
-              {editResult && (
-                <div className="glass rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs text-primary">
-                      <CheckCircle2 size={12} />
-                      <span className="font-medium">
-                        {editSubMode === 'png2svg' ? 'SVG 组件生成结果' : '文本提取结果'}
-                      </span>
-                      {isSVGResult(editResult) && (
-                        <span className="px-1.5 py-0.5 rounded bg-primary/10 text-[9px] text-primary">
-                          {editResult.svgComponents.length} 个组件
-                        </span>
-                      )}
-                    </div>
-                    {isSVGResult(editResult) && editResult.svgComponents.length > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-[10px] h-6 gap-1"
-                        onClick={() => downloadAllSVGComponents(editResult.svgComponents)}
-                      >
-                        <Download size={10} />
-                        导出全部 SVG
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* PNG → SVG: AI 直接生成的 SVG 组件 */}
-                  {isSVGResult(editResult) && editResult.svgComponents.length > 0 && (
-                    <div className="space-y-4 max-h-[550px] overflow-y-auto pr-1">
-                      {/* 类型统计概览 - 按类型分组显示数量 */}
-                      {(() => {
-                        const typeGroups = editResult.svgComponents.reduce((acc, comp) => {
-                          const key = comp.category
-                          if (!acc[key]) acc[key] = { label: comp.categoryLabel, color: getCategoryColor(comp.category), count: 0 }
-                          acc[key].count++
-                          return acc
-                        }, {} as Record<string, { label: string; color: string; count: number }>)
-                        return (
-                          <div className="flex flex-wrap gap-2 p-3 bg-[hsl(var(--surface-secondary)/0.3)] rounded-lg">
-                            {Object.entries(typeGroups).map(([cat, info]) => (
-                              <span
-                                key={cat}
-                                className="px-2 py-1 rounded text-[10px] flex items-center gap-1"
-                                style={{
-                                  backgroundColor: `${info.color}15`,
-                                  color: info.color,
-                                  border: `1px solid ${info.color}30`,
-                                }}
-                              >
-                                <Component size={8} />
-                                {info.label}
-                                <span className="text-[9px] opacity-70">×{info.count}</span>
-                              </span>
-                            ))}
-                            <span className="ml-auto text-[10px] text-muted-foreground self-center">
-                              共 {editResult.svgComponents.length} 个切图元素
-                            </span>
-                          </div>
-                        )
-                      })()}
-
-                      {/* 独立 SVG 切图卡片 - 紧凑网格布局 */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {editResult.svgComponents.map((svgComp) => (
-                        <div
-                          key={svgComp.id}
-                          className="bg-[hsl(var(--surface-secondary)/0.4)] rounded-lg overflow-hidden border border-[hsl(var(--foreground)/0.06)] flex flex-col"
-                        >
-                          {/* 组件头部 - 紧凑 */}
-                          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[hsl(var(--foreground)/0.04)]">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <div
-                                className="w-4 h-4 rounded flex-shrink-0 items-center justify-center flex"
-                                style={{ backgroundColor: `${getCategoryColor(svgComp.category)}25` }}
-                              >
-                                <Component size={8} style={{ color: getCategoryColor(svgComp.category) }} />
-                              </div>
-                              <span className="text-[11px] font-medium text-foreground truncate" title={svgComp.name}>{svgComp.name}</span>
-                            </div>
-                            <span className="text-[9px] text-muted-foreground flex-shrink-0 ml-1">
-                              {svgComp.width}×{svgComp.height}
-                            </span>
-                          </div>
-
-                          {/* SVG 预览 - 棋盘格背景，小元素居中 */}
-                          <div
-                            className="p-2 flex items-center justify-center flex-1"
-                            style={{
-                              minHeight: '90px',
-                              backgroundImage: 'linear-gradient(45deg, #334155 25%, transparent 25%), linear-gradient(-45deg, #334155 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #334155 75%), linear-gradient(-45deg, transparent 75%, #334155 75%)',
-                              backgroundSize: '10px 10px',
-                              backgroundPosition: '0 0, 0 5px, 5px -5px, -5px 0px',
-                              backgroundColor: '#1e293b',
-                            }}
-                          >
-                            <svg
-                              viewBox={`0 0 ${svgComp.width} ${svgComp.height}`}
-                              className="max-w-full max-h-[100px]"
-                              style={{
-                                maxWidth: '85%',
-                                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
-                              }}
-                              preserveAspectRatio="xMidYMid meet"
-                              dangerouslySetInnerHTML={{ __html: svgComp.innerContent }}
-                            />
-                          </div>
-
-                          {/* 操作按钮 - 紧凑 */}
-                          <div className="flex items-center border-t border-[hsl(var(--foreground)/0.04)] divide-x divide-[hsl(var(--foreground)/0.04)]">
-                            <button
-                              className="flex-1 py-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--foreground)/0.04)] transition-colors flex items-center justify-center gap-1"
-                              onClick={() => handleCopySVG(svgComp)}
-                            >
-                              {copiedId === svgComp.id ? (
-                                <><Check size={9} className="text-emerald-400" />已复制</>
-                              ) : (
-                                <><Copy size={9} />复制</>
-                              )}
-                            </button>
-                            <button
-                              className="flex-1 py-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--foreground)/0.04)] transition-colors flex items-center justify-center gap-1"
-                              onClick={() => downloadSVGComponent(svgComp)}
-                            >
-                              <Download size={9} />导出
-                            </button>
-                          </div>
-
-                          {/* SVG 代码预览 - 折叠 */}
-                          <details className="border-t border-[hsl(var(--foreground)/0.04)]">
-                            <summary className="px-2 py-1 text-[9px] text-muted-foreground cursor-pointer hover:text-foreground text-center">
-                              代码
-                            </summary>
-                            <pre className="px-2 pb-2 text-[8px] text-muted-foreground overflow-x-auto max-h-24 overflow-y-auto whitespace-pre-wrap break-all font-mono bg-[hsl(var(--surface-secondary)/0.3)]">
-                              {svgComp.normalizedSvg}
-                            </pre>
-                          </details>
-                        </div>
-                        ))}
-                      </div>
-
-                      {/* 导出全部按钮 */}
-                      <div className="flex justify-center pt-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-2 text-xs"
-                          onClick={() => downloadAllSVGComponents(editResult.svgComponents)}
-                        >
-                          <Download size={12} />
-                          导出全部 {editResult.svgComponents.length} 个 SVG 切图
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* PNG → SVG: 错误状态 - 显示原始图片和提示 */}
-                  {isSVGResult(editResult) && (editResult.hasError || editResult.svgComponents.length === 0) && (
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs">
-                        <AlertCircle size={14} />
-                        <span>{editResult.errorMessage || editResult.summary || '未能识别图片中的组件'}</span>
-                      </div>
-
-                      {editImage && (
-                        <div className="bg-[hsl(var(--surface-secondary)/0.3)] rounded-lg p-3">
-                          <p className="text-[10px] text-muted-foreground mb-2">原始上传图片：</p>
-                          <div className="border border-[hsl(var(--foreground)/0.06)] rounded-lg overflow-hidden">
-                            <img
-                              src={editImage}
-                              alt="上传的 HMI 界面"
-                              className="w-full h-auto max-h-[250px] object-contain"
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 原始AI输出调试信息 */}
-                      {editResult._raw && (
-                        <details className="bg-[hsl(var(--surface-secondary)/0.2)] rounded-lg">
-                          <summary className="px-3 py-2 text-[10px] text-muted-foreground cursor-pointer hover:text-foreground">
-                            查看 AI 原始输出（调试用）
-                          </summary>
-                          <pre className="px-3 pb-3 text-[9px] text-muted-foreground overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all font-mono border-t border-[hsl(var(--foreground)/0.06)] pt-2">
-                            {editResult._raw}
-                          </pre>
-                        </details>
-                      )}
-
-                      <p className="text-[10px] text-muted-foreground">
-                        提示：请确保上传清晰完整的车载 HMI 界面截图。如果仍有问题，可以尝试重新生成。
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Text Extract: Region groups */}
-                  {isTextResult(editResult) && editResult.regions && (
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {editResult.regions.map((region: EditRegion, i: number) => (
-                        <div key={i} className="bg-[hsl(var(--surface-secondary)/0.4)] rounded-lg p-3">
-                          <div className="text-xs font-medium text-foreground mb-2">{region.name}</div>
-                          <div className="space-y-1">
-                            {region.texts?.map((t: { type: string; content: string; description?: string }, j: number) => (
-                              <div key={j} className="flex items-center gap-2 text-[11px]">
-                                <span className="px-1 py-0.5 rounded text-[9px] bg-primary/10 text-primary">{t.type}</span>
-                                <span className="text-foreground">{t.content}</span>
-                                {t.description && <span className="text-muted-foreground text-[10px]">— {t.description}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Summary */}
-                  {editResult.summary && (
-                    <p className="text-[11px] text-muted-foreground border-t border-[hsl(var(--foreground)/0.06)] pt-2">
-                      {editResult.summary}
-                    </p>
-                  )}
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {activeTab === 'theme' && (
-            <motion.div
-              key="theme"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.15 }}
-              className="max-w-3xl mx-auto space-y-5"
-            >
-              {/* ── Header + Sub-nav ── */}
-              <div className="flex items-center justify-between">
-                <div>
-                  {themeSubMode === 'figma-swap' ? null : (
-                    <>
-                      <h2 className="text-xl font-semibold text-foreground">{themeSubMode === 'recolor' ? 'AI智能换色' : '主题工作室'}</h2>
-                      {themeSubMode !== 'recolor' && (
-                        <p className="text-sm text-muted-foreground mt-0.5">个性化定制你的 HMI 界面配色风格</p>
-                      )}
-                    </>
-                  )}
-                  {/* Quick Check Items */}
-                  {checkItemsByCategory['theme'].length > 0 && (
-                    <div className="flex flex-wrap gap-2 justify-start mt-3">
-                      {checkItemsByCategory['theme'].map((item) => (
-                        <CheckBadge
-                          key={item.id}
-                          type={item.type}
-                          label={item.label}
-                          detail={item.detail}
-                          compact
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {themeSubMode !== 'figma-swap' && (
-                <div className="flex items-center p-0.5 rounded-lg bg-[hsl(var(--surface-secondary)/0.6)] border border-[hsl(var(--foreground)/0.06)]">
-                  {(['preset', 'recolor'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setThemeSubMode(mode)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
-                        themeSubMode === mode
-                          ? 'bg-primary/15 text-primary'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
+          …9845 tokens truncated…                      }`}
                     >
                       {mode === 'preset' ? (
                         <><Palette size={11} /> 主题预设</>

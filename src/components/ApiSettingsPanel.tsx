@@ -43,6 +43,16 @@ async function checkVisionStatus(): Promise<{ ok: boolean; hint: string }> {
   } catch { return { ok: false, hint: '' } }
 }
 
+async function checkFigmaStatus(): Promise<boolean> {
+  try {
+    const token = getStoredFigmaToken().trim()
+    const res = await fetch('/api/figma/me', {
+      headers: token ? { 'X-Figma-Token': token } : undefined,
+    })
+    return res.ok
+  } catch { return false }
+}
+
 async function saveVisionEndpoint(endpointId: string): Promise<{ ok: boolean }> {
   try {
     const res = await fetch('/api/hmi/save_vision_endpoint', {
@@ -165,6 +175,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
       checkLoginStatus().then((s) => setArkConnected(s.ok))
       checkOpenAIStatus().then(setOpenaiConnected)
       checkVisionStatus().then((s) => setVisionConnected(s.ok))
+      checkFigmaStatus().then(setFigmaConnected)
     }
   }, [open])
 
@@ -244,17 +255,16 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
     if (!figmaToken.trim()) return
     setSavingFigma(true)
     setMessage(null)
-    // 先保存到本地存储
     const token = figmaToken.trim()
-    saveFigmaTokenLocal(token)
     // 测试Token是否有效（通过后端代理调用Figma API获取当前用户信息）
     try {
       setTestingFigma(true)
-      const resp = await fetch('/api/figma/me', {
+      const resp = await fetch('/api/figma/validate', {
         headers: { 'X-Figma-Token': token }
       })
       if (resp.ok) {
         const me = await resp.json()
+        saveFigmaTokenLocal(token)
         setFigmaConnected(true)
         setMessage({ ok: true, text: `Figma Token 保存成功！已连接为 ${me.handle || me.email || '用户'}` })
         notify({ app: 'figmaSync', title: '保存成功', body: `Figma Token 已验证，连接为 ${me.handle || me.email || '用户'}` })
@@ -263,15 +273,14 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
         setMessage({ ok: false, text: 'Figma Token 无效，请检查后重试' })
         notify({ app: 'figmaSync', title: '验证失败', body: 'Figma Token 无效，请检查后重试' })
       } else {
-        // 即使测试失败也保存到本地（可能是网络问题）
-        setFigmaConnected(true)
-        setMessage({ ok: true, text: 'Figma Token 已本地保存（连接测试未完成）' })
-        notify({ app: 'figmaSync', title: '已本地保存', body: 'Figma Token 已保存到本地（连接测试未完成）' })
+        setFigmaConnected(false)
+        setMessage({ ok: false, text: `Figma Token 验证失败（${resp.status}）` })
+        notify({ app: 'figmaSync', title: '验证失败', body: '连接测试未通过，请稍后重试' })
       }
     } catch {
-      setFigmaConnected(true)
-      setMessage({ ok: true, text: 'Figma Token 已本地保存' })
-      notify({ app: 'figmaSync', title: '已本地保存', body: 'Figma Token 已保存到本地' })
+      setFigmaConnected(false)
+      setMessage({ ok: false, text: 'Figma Token 验证请求失败' })
+      notify({ app: 'figmaSync', title: '验证失败', body: '网络错误，请稍后重试' })
     } finally {
       setSavingFigma(false)
       setTestingFigma(false)
@@ -703,7 +712,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
               </div>
 
               <p className="text-[10px] text-muted-foreground leading-relaxed">
-                AI 设计自检功能需要 Figma Personal Access Token 来访问真实的 Figma 设计文件数据。Token 仅保存在您的浏览器本地，不会上传到服务器。
+                已配置默认 Token 时可直接访问 Figma；手动填写的 Token 仅保存在当前浏览器。
               </p>
 
               <a
@@ -722,7 +731,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
                   type={showFigmaToken ? 'text' : 'password'}
                   value={figmaToken}
                   onChange={(e) => setFigmaToken(e.target.value)}
-                  placeholder=""
+                  placeholder={figmaConnected ? '已启用默认 Token，无需填写' : '输入 Figma Token'}
                   className="w-full h-9 pl-8 pr-9 text-xs bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/30 font-mono"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFigma() }}
                 />

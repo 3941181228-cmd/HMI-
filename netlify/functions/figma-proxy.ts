@@ -3,10 +3,18 @@ const FIGMA_API_BASE_URL = 'https://api.figma.com/v1'
 
 export default async function handler(event: any) {
   const path = event.path.replace(/^\/api\/figma/, '')
-  const url = `${FIGMA_API_BASE_URL}${path}${event.rawQuery ? '?' + event.rawQuery : ''}`
+  const isManualValidation = path === '/validate'
+  const targetPath = isManualValidation ? '/me' : path
+  const url = `${FIGMA_API_BASE_URL}${targetPath}${event.rawQuery ? '?' + event.rawQuery : ''}`
+  const requestToken = String(event.headers?.['x-figma-token'] || '').trim()
+  const token = isManualValidation ? requestToken : (FIGMA_API_TOKEN || requestToken)
+
+  if (!token) {
+    return { statusCode: 401, body: JSON.stringify({ ok: false, error: '尚未配置 Figma Token' }) }
+  }
 
   const headers: Record<string, string> = {
-    'X-Figma-Token': FIGMA_API_TOKEN
+    'X-Figma-Token': token
   }
 
   // 复制请求头

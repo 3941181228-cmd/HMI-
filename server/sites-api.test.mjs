@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import { handleApi } from './sites-api.mjs'
 
 const env = { JIMENG_API_KEY: 'test-server-secret' }
+const figmaEnv = { FIGMA_API_TOKEN: 'test-figma-secret' }
 const request = (path, data, headers = {}) => new Request(`https://example.test/api/jimeng/${path}`, data === undefined ? { headers } : {
   method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data),
 })
+const figmaRequest = (path, headers = {}) => new Request(`https://example.test/api/figma/${path}`, { headers })
 
 test('default key stays server-side and status reflects upstream authentication', async () => {
   for (const [status, expected] of [[200, true], [401, false], [503, false]]) {
@@ -100,4 +102,45 @@ test('the save endpoint accepts a body-only manual key without a deployed defaul
     return Response.json({})
   })
   assert.equal((await response.json()).ok, true)
+})
+
+test('Figma routes use the server default and preserve safe file queries', async () => {
+  const calls = []
+  const upstream = async (url, options) => {
+    calls.push({ url, token: options.headers['X-Figma-Token'] })
+    return Response.json(url.endsWith('/me') ? { id: 'user-1', handle: 'Designer' } : { name: 'Dashboard' })
+  }
+  const me = await handleApi(figmaRequest('me', { 'X-Figma-Token': 'stale-browser-token' }), figmaEnv, upstream)
+  assert.equal((await me.json()).handle, 'Designer')
+  const file = await handleApi(figmaRequest('files/abc_123?depth=2'), figmaEnv, upstream)
+  assert.equal((await file.json()).name, 'Dashboard')
+  assert.deepEqual(calls, [
+    { url: 'https://api.figma.com/v1/me', token: figmaEnv.FIGMA_API_TOKEN },
+    { url: 'https://api.figma.com/v1/files/abc_123?depth=2', token: figmaEnv.FIGMA_API_TOKEN },
+  ])
+})
+
+test('manual Figma validation checks the candidate without replacing the default', async () => {
+  const response = await handleApi(figmaRequest('validate', { 'X-Figma-Token': 'manual-figma-token' }), figmaEnv,
+    async (_, options) => {
+      assert.equal(options.headers['X-Figma-Token'], 'manual-figma-token')
+      return Response.json({ err: 'Invalid token' }, { status: 403 })
+    })
+  assert.equal(response.status, 403)
+  assert.equal((await response.json()).err, 'Invalid token')
+})
+
+test('Figma routes reject missing credentials, invalid paths and unsafe image proxy targets', async () => {
+  const noCall = () => { throw new Error('unexpected upstream call') }
+  assert.equal((await handleApi(figmaRequest('me'), {}, noCall)).status, 401)
+  assert.equal((await handleApi(figmaRequest('files/../../secret'), figmaEnv, noCall)).status, 404)
+  assert.equal((await handleApi(figmaRequest('proxy-image?url=http%3A%2F%2Flocalhost%2Fprivate'), figmaEnv, noCall)).status, 403)
+
+  const image = await handleApi(figmaRequest('proxy-image?url=https%3A%2F%2Fs3-alpha-sig.figma.com%2Fimg%2Fpreview.png'), figmaEnv,
+    async (_, options) => {
+      assert.equal(options.redirect, 'error')
+      return new Response('image', { headers: { 'Content-Type': 'image/png' } })
+    })
+  assert.equal(image.status, 200)
+  assert.equal(image.headers.get('Content-Type'), 'image/png')
 })

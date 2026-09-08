@@ -220,19 +220,11 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
   const [figmaConnected, setFigmaConnected] = useState(false)
   const [figmaUserInfo, setFigmaUserInfo] = useState<{ handle?: string; imgUrl?: string; email?: string } | null>(null)
 
-  // 默认Figma Token（用户提供）
-  const DEFAULT_FIGMA_TOKEN = ''
-
   useEffect(() => {
     if (open) {
       setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'connecting' as const } : p))
-      // 加载已保存的Figma Token，如果没有则使用默认Token
-      let savedFigmaToken = getStoredFigmaToken()
-      if (!savedFigmaToken && DEFAULT_FIGMA_TOKEN) {
-        // 首次打开时自动保存默认Token
-        saveFigmaToken(DEFAULT_FIGMA_TOKEN)
-        savedFigmaToken = DEFAULT_FIGMA_TOKEN
-      }
+      // 本地 Token 仅作为没有服务端默认配置时的回退
+      const savedFigmaToken = getStoredFigmaToken()
       if (savedFigmaToken) {
         setFigmaToken(savedFigmaToken)
       }
@@ -272,23 +264,22 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         }
       }).catch(() => {})
       
-      // 自动验证已保存的Figma Token
-      if (savedFigmaToken) {
-        verifyFigmaToken(savedFigmaToken).then(result => {
-          if (result.valid) {
-            setFigmaConnected(true)
-            setFigmaUserInfo(result.user || null)
-          }
-        }).catch(() => {})
-      }
+      // 优先验证服务端默认 Token；没有默认配置时自动回退到浏览器本地 Token
+      verifyFigmaToken(savedFigmaToken).then(result => {
+        setFigmaConnected(result.valid)
+        setFigmaUserInfo(result.valid ? result.user || null : null)
+      }).catch(() => {
+        setFigmaConnected(false)
+        setFigmaUserInfo(null)
+      })
     }
   }, [open])
 
   // 验证Figma Token
-  const verifyFigmaToken = async (token: string): Promise<{ valid: boolean; user?: { handle?: string; email?: string; imgUrl?: string }; error?: string }> => {
+  const verifyFigmaToken = async (token: string, validateManual = false): Promise<{ valid: boolean; user?: { handle?: string; email?: string; imgUrl?: string }; error?: string }> => {
     try {
-      const resp = await fetch('/api/figma/me', {
-        headers: { 'X-Figma-Token': token }
+      const resp = await fetch(validateManual ? '/api/figma/validate' : '/api/figma/me', {
+        headers: token ? { 'X-Figma-Token': token } : undefined,
       })
       const data = await resp.json()
       if (resp.ok && data.id) {
@@ -310,7 +301,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
     setFigmaConnected(false)
     setFigmaUserInfo(null)
 
-    const result = await verifyFigmaToken(token)
+    const result = await verifyFigmaToken(token, true)
 
     if (result.valid) {
       saveFigmaToken(token)
@@ -988,7 +979,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         </div>
         
         <p className="text-[10px] text-muted-foreground mb-3">
-          用于访问 Figma API 分析设计稿，需要 File content 只读权限。
+          已配置默认 Token 时可直接使用；手动填写的 Token 仅保存在当前浏览器，需要 File content 只读权限。
           <a 
             href="https://www.figma.com/developers/api#access-tokens" 
             target="_blank" 
@@ -1005,7 +996,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
             type={showFigmaToken ? 'text' : 'password'}
             value={figmaToken}
             onChange={(e) => setFigmaToken(e.target.value)}
-            placeholder=""
+            placeholder={figmaConnected ? '已启用默认 Token，无需填写' : '输入 Figma Token'}
             className="w-full h-9 pl-8 pr-9 text-xs bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/30 font-mono"
             onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFigma() }}
           />

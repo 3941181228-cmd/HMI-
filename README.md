@@ -10,6 +10,12 @@
 - 当前 HMI 预览站的默认密钥已在其服务端单独配置；克隆仓库不会自动获得该密钥。
 - `npm run test:jimeng` 检查默认密钥调用、连接状态、输入校验及错误处理，不调用收费生成接口。
 
+## Figma 默认 Token
+
+后端从 `FIGMA_API_TOKEN` 读取默认 Token。线上用户无需在浏览器中填写即可连接 Figma；如果部署平台没有默认配置，也可以在设置中手动输入并验证，手动 Token 只保存在当前浏览器。
+
+默认 Token 只作为服务端环境变量保存，不写入仓库、前端代码或构建产物。读取设计文件需要 `current_user:read` 与 `file_content:read` 权限。
+
 ## Sites 后端构建
 
-保留 `npm run build` 用于原有部署方式。`npm run build:sites` 为已有 Sites 项目生成包含页面和即梦接口的 Worker；需要该项目的 `.openai/hosting.json` 和服务端 `JIMENG_API_KEY`。图片沿用仓库中固定版本的公开资源。
+保留 `npm run build` 用于原有部署方式。`npm run build:sites` 为已有 Sites 项目生成包含页面、即梦接口和 Figma 代理的 Worker；需要该项目的 `.openai/hosting.json` 及相应服务端环境变量。图片沿用仓库中固定版本的公开资源。

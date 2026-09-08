@@ -13,9 +13,10 @@ const TRIPO_API_BASE = 'https://openapi.tripo3d.com/v3'
 const TRIPO_DEFAULT_MODEL = 'v3.1-20260211'
 
 // In-memory API key storage (persists during dev session)
-let storedApiKey = process.env.JIMENG_API_KEY || process.env.ARK_API_KEY || ''
+let storedApiKey = process.env.ARK_API_KEY || ''
 let storedOpenAIKey = process.env.OPENAI_API_KEY || ''
 let storedVisionEndpoint = 'ep-20260522095644-hdr5h'  // Endpoint ID for Ark vision model
+let storedFigmaKey = process.env.FIGMA_API_TOKEN || ''
 // Tripo API Key（用户提供的默认 token，可在运行时覆盖）
 let storedTripoKey = process.env.TRIPO_API_KEY || ''
 
@@ -81,8 +82,7 @@ async function callArkAPI(apiKey: string, requestBody: Record<string, unknown>):
   }
 }
 
-export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
-  storedApiKey = env.JIMENG_API_KEY || env.ARK_API_KEY || storedApiKey
+export function jimengServerPlugin(): Plugin {
   return {
     name: 'jimeng-server',
     configureServer(server: ViteDevServer) {
@@ -104,7 +104,7 @@ export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
           } else if (resp.status === 401 || resp.status === 403) {
             json(res, 200, { ok: false, credit: 'API Key 无效或已过期' })
           } else {
-            json(res, 200, { ok: false, credit: 'API Key 已配置，暂时无法验证连接' })
+            json(res, 200, { ok: true, credit: 'API Key 已配置（状态未知）' })
           }
         } catch {
           json(res, 200, { ok: false, credit: '无法连接至 Ark API，请检查网络' })
@@ -121,7 +121,7 @@ export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
         const body = await readBody(req)
         try {
           const data = JSON.parse(body)
-          const key = (data.api_key || '').trim() || storedApiKey
+          const key = (data.api_key || '').trim()
           if (!key) {
             json(res, 400, { error: 'api_key is required' })
             return
@@ -137,10 +137,10 @@ export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
             } else if (checkResp.status === 401 || checkResp.status === 403) {
               json(res, 200, { ok: false, message: 'API Key 无效或已过期，已保存但不可用' })
             } else {
-              json(res, 200, { ok: false, message: 'API Key 已保存，暂时无法验证连接' })
+              json(res, 200, { ok: true, message: 'API Key 已保存（无法验证状态）' })
             }
           } catch {
-            json(res, 200, { ok: false, message: 'API Key 已保存，暂时无法连接至 Ark API' })
+            json(res, 200, { ok: true, message: 'API Key 已保存（无法连接至 Ark API）' })
           }
         } catch {
           json(res, 400, { error: 'Invalid JSON' })
@@ -869,11 +869,11 @@ export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
       })
 
       // ── Figma API 动态代理 ──────────────────────────────────────────
-      // 从请求头 X-Figma-Token 获取用户的 Personal Access Token，避免CORS和Token暴露
+      // 优先使用服务端默认 Token；未配置时允许浏览器本地 Token 作为回退
       // 服务端 fetch 带 45 秒超时，防止 Node.js undici 默认 5 分钟 headersTimeout 导致卡死
-      async function proxyFigmaRequest(req: IncomingMessage, res: ServerResponse, figmaPath: string) {
-        // 从请求头获取Token
-        const token = req.headers['x-figma-token'] as string
+      async function proxyFigmaRequest(req: IncomingMessage, res: ServerResponse, figmaPath: string, validateManual = false) {
+        const requestToken = (req.headers['x-figma-token'] as string || '').trim()
+        const token = validateManual ? requestToken : (storedFigmaKey || requestToken)
         if (!token) {
           json(res, 401, { ok: false, error: '请先配置 Figma Personal Access Token' })
           return
@@ -929,6 +929,11 @@ export function jimengServerPlugin(env: Record<string, string> = {}): Plugin {
           return
         }
         await proxyFigmaRequest(req, res, '/me')
+      })
+
+      // 单独验证用户手动输入的 Token，避免默认 Token 掩盖无效输入
+      server.middlewares.use('/api/figma/validate', async (req, res) => {
+        await proxyFigmaRequest(req, res, '/me', true)
       })
 
       // Figma 获取文件

@@ -119,14 +119,8 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
       setSelectedRules(rules);
     }
 
-    // 检查是否配置了Figma Token
+    // 浏览器本地 Token 可选；服务端默认 Token 会自动回退
     const figmaToken = getStoredFigmaToken();
-    if (!figmaToken) {
-      setConnectionStatus('error');
-      setConnectionError('请先在「系统设置 → API 配置」中配置 Figma Personal Access Token');
-      setIsConnecting(false);
-      return;
-    }
 
     const figmaUrlRegex = /https?:\/\/(?:www\.)?figma\.com\/(file|proto|design)\/([a-zA-Z0-9-_]+)\/?.*$/;
     const match = url.match(figmaUrlRegex);
@@ -549,4 +543,3 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
 
   return renderCheckPage();
 }
-

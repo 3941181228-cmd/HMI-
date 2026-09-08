@@ -1,5 +1,6 @@
 const ARK_BASE = 'https://ark.cn-beijing.volces.com/api/v3'
 const DEFAULT_MODEL = 'doubao-seedream-5-0-260128'
+const FIGMA_API_BASE = 'https://api.figma.com/v1'
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -23,9 +24,73 @@ async function verifyKey(key, upstream, manual = false) {
   }
 }
 
+function isAllowedFigmaImageUrl(target) {
+  if (target.protocol !== 'https:' || target.username || target.password || target.port) return false
+  const host = target.hostname.toLowerCase()
+  if (host === 'figma.com' || host.endsWith('.figma.com')) return true
+  if (host === 's3-us-west-2.amazonaws.com' || host === 's3.us-west-2.amazonaws.com') {
+    return target.pathname.startsWith('/figma')
+  }
+  return host.endsWith('.amazonaws.com') && host.includes('.s3') && host.split('.')[0].includes('figma')
+}
+
+async function handleFigmaApi(request, env, upstream) {
+  const url = new URL(request.url)
+  const path = url.pathname
+  const error = (message, status = 400) => json({ ok: false, error: message }, status)
+
+  if (request.method !== 'GET') return error('请使用 GET 请求', 405)
+
+  if (path === '/api/figma/proxy-image') {
+    let target
+    try { target = new URL(url.searchParams.get('url')) } catch { return error('图片地址无效') }
+    if (!isAllowedFigmaImageUrl(target)) return error('不支持此图片来源', 403)
+    try {
+      const response = await upstream(target.href, { redirect: 'error', signal: AbortSignal.timeout(30000) })
+      const contentType = response.headers.get('Content-Type') || ''
+      if (!response.ok || !contentType.startsWith('image/')) return error('图片下载失败', 502)
+      return new Response(response.body, { headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'private, max-age=3600',
+      } })
+    } catch { return error('图片下载失败，请稍后重试', 502) }
+  }
+
+  const requestToken = request.headers.get('X-Figma-Token')?.trim() || ''
+  const isManualValidation = path === '/api/figma/validate'
+  const token = isManualValidation ? requestToken : (env.FIGMA_API_TOKEN || requestToken)
+  if (!token) return error('尚未配置 Figma Token', 401)
+
+  let figmaPath
+  if (path === '/api/figma/me' || isManualValidation) {
+    figmaPath = '/me'
+  } else {
+    const match = path.match(/^\/api\/figma\/(files|images)\/([A-Za-z0-9_-]{1,200})$/)
+    if (!match) return error('Figma 接口不存在', 404)
+    figmaPath = `/${match[1]}/${match[2]}`
+  }
+
+  const target = new URL(`${FIGMA_API_BASE}${figmaPath}`)
+  target.search = url.search
+  try {
+    const response = await upstream(target.href, {
+      headers: { 'X-Figma-Token': token },
+      signal: AbortSignal.timeout(45000),
+    })
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        'Content-Type': response.headers.get('Content-Type') || 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    })
+  } catch { return error('Figma API 暂时无法响应，请稍后重试', 504) }
+}
+
 export async function handleApi(request, env, upstream = fetch) {
   const url = new URL(request.url)
   const path = url.pathname
+  if (path.startsWith('/api/figma/')) return handleFigmaApi(request, env, upstream)
   const requestKey = request.headers.get('X-Jimeng-Api-Key')?.trim() || ''
   const defaultKey = env.JIMENG_API_KEY || env.ARK_API_KEY || ''
   const key = defaultKey || requestKey
