@@ -1,3 +1,4 @@
+import VectorTracePanel from './VectorTracePanel'
 import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -256,6 +257,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const [genCustomWidth, setGenCustomWidth] = useState(1920)
   const [genCustomHeight, setGenCustomHeight] = useState(1080)
   const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false)
+  const [editWorkflow, setEditWorkflow] = useState<'trace' | 'ai'>('trace')
   const [editSubMode, setEditSubMode] = useState<'png2svg' | 'text_extract'>('png2svg')
   const [editImage, setEditImage] = useState<string | null>(null)
   const [editImageName, setEditImageName] = useState('')
@@ -2790,7 +2792,14 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
           </motion.div>
           )}
 
-          {activeTab === 'edit' && (
+          {activeTab === 'edit' && editSubMode === 'png2svg' && (
+            <div className="max-w-6xl mx-auto mb-5 flex gap-3">
+              <Button variant={editWorkflow === 'trace' ? 'glow' : 'outline'} onClick={() => setEditWorkflow('trace')}>位图矢量描摹</Button>
+              <Button variant={editWorkflow === 'ai' ? 'glow' : 'outline'} onClick={() => setEditWorkflow('ai')}>AI 组件识别</Button>
+            </div>
+          )}
+          {activeTab === 'edit' && editSubMode === 'png2svg' && editWorkflow === 'trace' && <VectorTracePanel />}
+          {activeTab === 'edit' && (editSubMode !== 'png2svg' || editWorkflow === 'ai') && (
             <motion.div
               key="edit"
               initial={{ opacity: 0, y: 8 }}

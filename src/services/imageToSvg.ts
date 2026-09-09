@@ -48,7 +48,7 @@ export interface SvgTraceOptions {
 
 /** 默认参数（适合图标矢量化） */
 export const DEFAULT_TRACE_OPTIONS: SvgTraceOptions = {
-  mode: 'brightness',
+  mode: 'color',
   brightnessThreshold: 0.45,
   edgeThreshold: 0.5,
   colorCount: 8,
@@ -323,7 +323,7 @@ function colorQuantization(
   const step = Math.max(1, Math.ceil(size / SAMPLE_LIMIT))
   for (let p = 0; p < size; p += step) {
     const i = p * 4
-    if (data[i + 3] < 128) continue // 跳过透明像素
+    if (data[i + 3] < 8) continue // 跳过几乎透明像素
     pixels.push([data[i], data[i + 1], data[i + 2]])
   }
   if (pixels.length === 0) {
@@ -361,7 +361,7 @@ function colorQuantization(
         else maxChannel = 0
       }
     }
-    if (maxIdx === -1) break // 无法继续拆分
+    if (maxIdx === -1 || maxRange === 0) break // 无法继续拆分
     const bucket = buckets[maxIdx]
     bucket.sort((a, b) => a[maxChannel] - b[maxChannel])
     const mid = bucket.length >> 1
@@ -400,7 +400,7 @@ function colorQuantization(
   const alphaCnt = palette.map(() => 0)
   for (let p = 0; p < size; p++) {
     const i = p * 4
-    if (data[i + 3] < 128) continue // 透明像素不分配
+    if (data[i + 3] < 8) continue // 透明像素不分配
     let bestIdx = 0
     let bestDist = Infinity
     for (let c = 0; c < paletteRgb.length; c++) {
@@ -481,7 +481,7 @@ async function traceBlackWhite(
   const result = await potrace(imageData, options as unknown as Record<string, unknown>)
   // pathonly=true 时返回 string[]；统一返回数组形式
   if (Array.isArray(result)) {
-    return result as string[]
+    return [(result as string[]).join(' ')] // 保留同一轮廓的孔洞子路径
   }
   return [result as string]
 }
@@ -517,7 +517,7 @@ function buildSvg(
       const op = p.fillOpacity !== undefined && p.fillOpacity < 0.999
         ? ` fill-opacity="${roundNum(p.fillOpacity)}"`
         : ''
-      return `  <path d="${p.d}" fill="${p.fill}"${op}/>`
+      return `  <path d="${p.d}" fill="${p.fill}" fill-rule="evenodd"${op}/>`
     })
     .join('\n')
   return `${svgHeader(width, height)}\n<g>\n${body}\n</g>${SVG_FOOTER}`
@@ -1526,6 +1526,14 @@ export async function pngBlobToSvg(
     throw new Error('PNG 数据为空（0 字节）')
   }
 
+  return imageDataToSvg(await pngBlobToImageData(blob), options)
+}
+
+/** Pixel entry point usable in a dedicated worker without DOM access. */
+export async function imageDataToSvg(imageData: ImageData, options?: Partial<SvgTraceOptions>): Promise<string> {
+  if (!imageData.width || !imageData.height || imageData.width * imageData.height > 4_000_000) {
+    throw new Error('图片需小于 400 万像素，请先缩小或裁剪')
+  }
   const opts: SvgTraceOptions = { ...DEFAULT_TRACE_OPTIONS, ...(options || {}) }
   const mode = opts.mode
 
@@ -1535,7 +1543,6 @@ export async function pngBlobToSvg(
   }
 
   // 1. PNG Blob → ImageData
-  const imageData = await pngBlobToImageData(blob)
   const { width, height } = imageData
 
   // rawSvg：Potrace 生成的原始 SVG（后处理阶段会在此基础上做几何优化）
@@ -1606,33 +1613,10 @@ export async function pngBlobToSvg(
     }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
-    // 非亮度模式失败时回退到亮度截断模式
-    if (mode !== 'brightness') {
-      try {
-        const threshold = Math.min(1, Math.max(0, opts.brightnessThreshold ?? 0.45))
-        const bitmap = brightnessCutoff(imageData, threshold)
-        const nativeOpts = buildPotraceOptions(
-          { ...opts, mode: 'brightness' },
-          true,
-          false,
-        )
-        const paths = await traceBlackWhite(bitmap, width, height, nativeOpts)
-        if (paths.length === 0) {
-          throw new Error('追踪结果为空')
-        }
-        rawSvg = buildSvg(
-          paths.map(d => ({ d, fill: '#000000' })),
-          width,
-          height,
-        )
-      } catch (fallbackErr) {
-        const fbReason = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
-        throw new Error(`位图追踪失败（已回退到亮度截断）：${fbReason}`)
-      }
-    } else {
-      throw new Error(`位图追踪失败：${reason}`)
-    }
+    throw new Error(`位图追踪失败：${reason}。请调整颜色数量或细节参数后重试。`)
   }
+  // Worker output retains the original traced geometry; size alone is not a fidelity metric.
+  if (typeof DOMParser === 'undefined') return rawSvg
 
   // 3. 后处理优化（参考 vectorizer.ai）：形状拟合 / 角点清理 / 圆弧检测 / 对称建模 / 路径简化
   //    任一阶段失败或结果不更紧凑均回退到 rawSvg，绝不劣化输出
