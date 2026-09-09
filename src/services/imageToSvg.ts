@@ -1,3 +1,4 @@
+import { quantizeRgba } from './vectorPalette'
 /**
  * PNG 位图转 SVG 矢量图工具
  * 参考 Inkscape 的 Trace Bitmap 功能，使用 Potrace WASM 替代 imagetracerjs。
@@ -51,13 +52,13 @@ export const DEFAULT_TRACE_OPTIONS: SvgTraceOptions = {
   mode: 'color',
   brightnessThreshold: 0.45,
   edgeThreshold: 0.5,
-  colorCount: 8,
+  colorCount: 32,
   multiscanColors: 8,
   multiscanSmooth: true,
   multiscanStack: true,
-  turdSize: 2,
+  turdSize: 0,
   alphaMax: 1.0,
-  opttolerance: 0.2,
+  opttolerance: 0.1,
   curveOptimization: true,
   enableShapeFitting: true,
   enableCornerCleaning: true,
@@ -310,120 +311,7 @@ function cannyEdgeDetection(imageData: ImageData, threshold: number): Uint8Array
  *
  * @returns bitmaps: 每个颜色一个二值图（1=该颜色像素）；palette: 颜色调色板；alphas: 每色调色板平均不透明度（0-1）
  */
-function colorQuantization(
-  imageData: ImageData,
-  numColors: number,
-): { bitmaps: Uint8Array[]; palette: string[]; alphas: number[] } {
-  const { data, width, height } = imageData
-  const size = width * height
-
-  // 收集不透明像素的 RGB（采样以加速大图）
-  const pixels: number[][] = []
-  const SAMPLE_LIMIT = 60000 // 采样上限
-  const step = Math.max(1, Math.ceil(size / SAMPLE_LIMIT))
-  for (let p = 0; p < size; p += step) {
-    const i = p * 4
-    if (data[i + 3] < 8) continue // 跳过几乎透明像素
-    pixels.push([data[i], data[i + 1], data[i + 2]])
-  }
-  if (pixels.length === 0) {
-    return { bitmaps: [], palette: [], alphas: [] }
-  }
-
-  // 中值切分：迭代拆分范围最大的桶，直到得到 numColors 个桶
-  let buckets: number[][][] = [pixels]
-  while (buckets.length < numColors) {
-    // 找到范围最大的桶
-    let maxRange = -1
-    let maxIdx = -1
-    let maxChannel = 0
-    for (let b = 0; b < buckets.length; b++) {
-      const bucket = buckets[b]
-      if (bucket.length < 2) continue
-      let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0
-      for (const px of bucket) {
-        if (px[0] < rMin) rMin = px[0]
-        if (px[0] > rMax) rMax = px[0]
-        if (px[1] < gMin) gMin = px[1]
-        if (px[1] > gMax) gMax = px[1]
-        if (px[2] < bMin) bMin = px[2]
-        if (px[2] > bMax) bMax = px[2]
-      }
-      const rRange = rMax - rMin
-      const gRange = gMax - gMin
-      const bRange = bMax - bMin
-      const range = Math.max(rRange, gRange, bRange)
-      if (range > maxRange) {
-        maxRange = range
-        maxIdx = b
-        if (gRange >= rRange && gRange >= bRange) maxChannel = 1
-        else if (bRange >= rRange && bRange >= gRange) maxChannel = 2
-        else maxChannel = 0
-      }
-    }
-    if (maxIdx === -1 || maxRange === 0) break // 无法继续拆分
-    const bucket = buckets[maxIdx]
-    bucket.sort((a, b) => a[maxChannel] - b[maxChannel])
-    const mid = bucket.length >> 1
-    const left = bucket.slice(0, mid)
-    const right = bucket.slice(mid)
-    buckets.splice(maxIdx, 1, left, right)
-  }
-
-  // 计算每个桶的平均颜色，生成调色板
-  const palette: string[] = buckets.map(bucket => {
-    let r = 0, g = 0, b = 0
-    for (const px of bucket) {
-      r += px[0]
-      g += px[1]
-      b += px[2]
-    }
-    const n = bucket.length || 1
-    return (
-      '#' +
-      [r, g, b]
-        .map(v => Math.round(v / n).toString(16).padStart(2, '0'))
-        .join('')
-    )
-  })
-
-  // 将每个像素分配到最近的调色板颜色，生成每个颜色的二值图
-  // 解析调色板为 RGB 数组以加速比较
-  const paletteRgb = palette.map(hex => [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ])
-  const bitmaps: Uint8Array[] = palette.map(() => new Uint8Array(size))
-  // 累计每个调色板颜色的 alpha 总和与像素数，用于计算平均不透明度
-  const alphaSum = palette.map(() => 0)
-  const alphaCnt = palette.map(() => 0)
-  for (let p = 0; p < size; p++) {
-    const i = p * 4
-    if (data[i + 3] < 8) continue // 透明像素不分配
-    let bestIdx = 0
-    let bestDist = Infinity
-    for (let c = 0; c < paletteRgb.length; c++) {
-      const dr = data[i] - paletteRgb[c][0]
-      const dg = data[i + 1] - paletteRgb[c][1]
-      const db = data[i + 2] - paletteRgb[c][2]
-      const dist = dr * dr + dg * dg + db * db
-      if (dist < bestDist) {
-        bestDist = dist
-        bestIdx = c
-      }
-    }
-    bitmaps[bestIdx][p] = 1
-    alphaSum[bestIdx] += data[i + 3]
-    alphaCnt[bestIdx] += 1
-  }
-  // 平均不透明度（0-1）；无像素的颜色记为 1（保持兼容）
-  const alphas: number[] = palette.map((_, idx) =>
-    alphaCnt[idx] > 0 ? alphaSum[idx] / alphaCnt[idx] / 255 : 1,
-  )
-
-  return { bitmaps, palette, alphas }
-}
+const colorQuantization = quantizeRgba
 
 // ============== Potrace 调用 ==============
 
@@ -1564,7 +1452,7 @@ export async function imageDataToSvg(imageData: ImageData, options?: Partial<Svg
       rawSvg = svgStr
     } else if (mode === 'color') {
       // 颜色量化：中值切分得到多个二值图，逐个追踪后按颜色合并
-      const colorCount = Math.min(32, Math.max(2, Math.round(opts.colorCount ?? 8)))
+      const colorCount = Math.min(64, Math.max(2, Math.round(opts.colorCount ?? 32)))
       const { bitmaps, palette, alphas } = colorQuantization(imageData, colorCount)
       if (bitmaps.length === 0) {
         throw new Error('颜色量化结果为空（可能图像完全透明）')

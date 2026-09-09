@@ -164,7 +164,9 @@ async function handler(event, env, upstream = fetch) {
 3. x,y\u662F\u8BE5\u5143\u7D20\u5728\u539F\u56FE\u4E2D\u7684\u4F4D\u7F6E\uFF0Cwidth,height\u662F\u5143\u7D20\u5C3A\u5BF8
 4. \u4F7F\u7528rect,circle,ellipse,path,line,text,g\u7B49\u6807\u51C6\u5143\u7D20\uFF0C\u3010\u7EDD\u5BF9\u7981\u6B62\u3011\u4F7F\u7528<image>\u6807\u7B7E\u5F15\u7528\u5916\u90E8URL
 5. \u989C\u8272\u7528#RRGGBB\uFF0C\u6587\u5B57\u7528<text>\u6807\u7B7E\uFF0Cfont-family="system-ui,sans-serif"
-6. \u5207\u51FA8-15\u4E2A\u4E3B\u8981\u7684\u72EC\u7ACB\u5143\u7D20\u5373\u53EF\uFF08\u4F18\u5148\u5207\u5927\u7684\u3001\u663E\u773C\u7684\u5143\u7D20\uFF09
+6. 保留所有可见且能辨认的独立 UI 元素，不限制为几个大组件；不得省略小图标、文字、细线或状态指示。优先准确还原，再分组。
+7. 严格按原图的比例、坐标、间距、圆角和层级绘制，不美化、不重新设计。保留原始配色、透明度及线宽；真实渐变使用 linearGradient 或 radialGradient，避免用大块纯色替代。
+8. 保留可辨认的原始文本，不编造文字；难以辨认的细节保守处理。
 
 \u3010\u91CD\u8981\u3011\u4E25\u683C\u6309\u6807\u8BB0\u683C\u5F0F\u8F93\u51FA\uFF0C\u4E0D\u8981markdown\u4EE3\u7801\u5757\uFF0C\u4E0D\u8981\u89E3\u91CA\u6587\u5B57\uFF0C\u76F4\u63A5\u4EE5[HMI_SVG_BEGIN\u5F00\u5934\u8F93\u51FA\u3002SVG\u4EE3\u7801\u5C3D\u91CF\u7B80\u6D01\uFF0C\u4E0D\u8981\u5199\u6CE8\u91CA\u3002`;
     }
@@ -194,6 +196,7 @@ async function handler(event, env, upstream = fetch) {
       const errMsg = respData.error?.message || respData.message || `API error ${resp.status}`;
       return { statusCode: resp.status, body: JSON.stringify({ ok: false, error: errMsg }) };
     }
+    if (respData.choices?.[0]?.finish_reason === "length") return { statusCode: 422, body: JSON.stringify({ ok: false, error: "结果超出模型输出长度，请裁剪为一个界面区域再转换，以保留完整细节" }) };
     const rawContent = respData.choices?.[0]?.message?.content || "";
     if (mode === "text_extract") {
       const codeMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/);

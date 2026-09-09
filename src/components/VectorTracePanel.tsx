@@ -4,15 +4,16 @@ import { Button } from './ui/button'
 import type { SvgTraceOptions } from '../services/imageToSvg'
 
 const presets = {
-  icon: { label: '彩色图标', mode: 'color', colorCount: 8, turdSize: 2, alphaMax: 1, opttolerance: 0.2 },
-  detail: { label: '精细插画', mode: 'color', colorCount: 24, turdSize: 0, alphaMax: 0.8, opttolerance: 0.1 },
-  mono: { label: '单色标识', mode: 'brightness', colorCount: 2, turdSize: 2, alphaMax: 1, opttolerance: 0.2 },
+  icon: { label: '彩色图标', mode: 'color', colorCount: 16, turdSize: 0, alphaMax: 1, opttolerance: 0.1 },
+  detail: { label: '精细插画', mode: 'color', colorCount: 48, turdSize: 0, alphaMax: 0.8, opttolerance: 0.1 },
+  hmi: { label: 'HMI 精细还原', mode: 'color', colorCount: 32, turdSize: 0, alphaMax: 0.8, opttolerance: 0.05 },
+  mono: { label: '单色标识', mode: 'brightness', colorCount: 2, turdSize: 2, alphaMax: 1, opttolerance: 0.1 },
 } as const
 const checker = { backgroundColor: '#25252d', backgroundImage: 'conic-gradient(#35353f 25%,transparent 0 50%,#35353f 0 75%,transparent 0)', backgroundSize: '20px 20px' }
 
 export default function VectorTracePanel() {
   const [source, setSource] = useState<{ url: string; name: string; width: number; height: number; pixels: ImageData } | null>(null)
-  const [options, setOptions] = useState<Partial<SvgTraceOptions>>({ ...presets.icon, brightnessThreshold: 0.45 })
+  const [options, setOptions] = useState<Partial<SvgTraceOptions>>({ ...presets.hmi, brightnessThreshold: 0.45 })
   const [result, setResult] = useState<{ url: string; svg: string; count: number; seconds: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -76,7 +77,8 @@ export default function VectorTracePanel() {
           <legend className="font-medium mb-3">描摹设置</legend>
           <div className="flex flex-wrap gap-2">{Object.entries(presets).map(([key, p]) => <button key={key} onClick={() => update(p)} className="border border-primary/30 rounded-lg px-3 py-2 hover:bg-primary/10">{p.label}</button>)}</div>
           <label className="block">描摹模式<select className="block w-full mt-2 bg-background border rounded-lg p-2" value={options.mode} onChange={e => update({ mode: e.target.value as 'color' | 'brightness' })}><option value="color">彩色 · 保留配色</option><option value="brightness">单色 · 黑色轮廓</option></select></label>
-          {options.mode === 'color' ? <label className="block">颜色数量：{options.colorCount}<input aria-label="颜色数量" className="block w-full mt-2 accent-purple-500" type="range" min="2" max="32" value={options.colorCount} onChange={e => update({ colorCount: +e.target.value })} /></label> : <label className="block">亮度阈值：{options.brightnessThreshold}<input aria-label="亮度阈值" className="block w-full mt-2" type="range" min="0.05" max="0.95" step="0.05" value={options.brightnessThreshold} onChange={e => update({ brightnessThreshold: +e.target.value })} /></label>}
+          {options.mode === 'color' ? <label className="block">颜色数量：{options.colorCount}<input aria-label="颜色数量" className="block w-full mt-2 accent-purple-500" type="range" min="2" max="64" value={options.colorCount} onChange={e => update({ colorCount: +e.target.value })} /></label> : <label className="block">亮度阈值：{options.brightnessThreshold}<input aria-label="亮度阈值" className="block w-full mt-2" type="range" min="0.05" max="0.95" step="0.05" value={options.brightnessThreshold} onChange={e => update({ brightnessThreshold: +e.target.value })} /></label>}
+          <label className="block">细节精度<select className="block w-full mt-2 bg-background border rounded-lg p-2" value={options.opttolerance} onChange={e => update({ opttolerance: +e.target.value })}><option value="0.05">精细 · 更多轮廓节点</option><option value="0.1">均衡</option><option value="0.3">精简 · 更小文件</option></select></label>
           <label className="block">去除小斑点：{options.turdSize} px<input aria-label="去除小斑点" className="block w-full mt-2" type="range" min="0" max="20" value={options.turdSize} onChange={e => update({ turdSize: +e.target.value })} /></label>
           <label className="block">曲线平滑：{options.alphaMax}<input aria-label="曲线平滑" className="block w-full mt-2" type="range" min="0" max="1.33" step="0.01" value={options.alphaMax} onChange={e => update({ alphaMax: +e.target.value })} /></label>
           <p className="text-muted-foreground text-xs leading-relaxed">平面图标、标识效果更好。照片、渐变和小字号文字会被近似描摹，文字不会自动恢复为可编辑文本。需要拆分界面元素时使用 AI 组件识别。</p>
