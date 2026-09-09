@@ -1,6 +1,8 @@
 const ARK_BASE = 'https://ark.cn-beijing.volces.com/api/v3'
 const DEFAULT_MODEL = 'doubao-seedream-5-0-260128'
 const FIGMA_API_BASE = 'https://api.figma.com/v1'
+const OPENAI_API_BASE = 'https://api.openai.com/v1'
+const DEFAULT_OPENAI_IMAGE_MODEL = 'gpt-image-1'
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -87,10 +89,133 @@ async function handleFigmaApi(request, env, upstream) {
   } catch { return error('Figma API 暂时无法响应，请稍后重试', 504) }
 }
 
+function openAIError(data, fallback) {
+  return data?.error?.message || data?.message || fallback
+}
+
+function openAIImages(data) {
+  if (!Array.isArray(data?.data)) return []
+  return data.data.flatMap((item) => {
+    if (typeof item?.url === 'string' && item.url) return [item.url]
+    if (typeof item?.b64_json === 'string' && item.b64_json) {
+      return [`data:image/png;base64,${item.b64_json}`]
+    }
+    return []
+  })
+}
+
+async function verifyOpenAIKey(key, env, upstream) {
+  if (!key) return { ok: false, configured: false, credit: '尚未配置默认 OpenAI API' }
+  const model = env.OPENAI_IMAGE_MODEL || DEFAULT_OPENAI_IMAGE_MODEL
+  try {
+    const response = await upstream(`${OPENAI_API_BASE}/models/${encodeURIComponent(model)}`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (response.ok) return { ok: true, configured: true, credit: 'OpenAI API 已验证' }
+    let data = null
+    try { data = await response.json() } catch {}
+    return {
+      ok: false,
+      configured: true,
+      credit: [401, 403].includes(response.status)
+        ? 'OpenAI API Key 无效或无权访问当前模型'
+        : openAIError(data, `OpenAI API 验证失败（${response.status}）`),
+    }
+  } catch {
+    return { ok: false, configured: true, credit: '暂时无法连接 OpenAI API，请稍后重试' }
+  }
+}
+
+async function handleOpenAIApi(request, env, upstream) {
+  const url = new URL(request.url)
+  const path = url.pathname
+  const requestKey = request.headers.get('X-OpenAI-Api-Key')?.trim() || ''
+  const defaultKey = env.OPENAI_API_KEY || ''
+  const key = defaultKey || requestKey
+  const error = (message, status = 400) => json({ ok: false, images: [], error: message, message }, status)
+
+  if (path === '/api/openai/status' && request.method === 'GET') {
+    return json(await verifyOpenAIKey(key, env, upstream))
+  }
+
+  if (request.method !== 'POST') return error('请使用 POST 请求', 405)
+  let data
+  try { data = await request.json() } catch { return error('请求格式无效') }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return error('请求格式无效')
+
+  if (path === '/api/openai/save_key') {
+    const candidate = requestKey || (typeof data.api_key === 'string' ? data.api_key.trim() : '')
+    if (!candidate) return error('请输入 OpenAI API Key', 400)
+    const status = await verifyOpenAIKey(candidate, env, upstream)
+    return json({ ...status, message: status.ok ? 'OpenAI API Key 已验证，可保存在当前浏览器' : status.credit }, status.ok ? 200 : 401)
+  }
+
+  if (!['/api/openai/text2image', '/api/openai/image2image'].includes(path)) {
+    return error('OpenAI 接口不存在', 404)
+  }
+  if (!key) return error('尚未配置默认 OpenAI API', 503)
+  if (typeof data.prompt !== 'string' || !data.prompt.trim()) return error('请输入生成描述')
+
+  const model = env.OPENAI_IMAGE_MODEL || DEFAULT_OPENAI_IMAGE_MODEL
+  let response
+  try {
+    if (path === '/api/openai/text2image') {
+      response = await upstream(`${OPENAI_API_BASE}/images/generations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          prompt: data.prompt.trim(),
+          n: 1,
+          size: '1536x1024',
+        }),
+        signal: AbortSignal.timeout(120000),
+      })
+    } else {
+      if (typeof data.image_base64 !== 'string' || !data.image_base64) return error('请先上传参考图')
+      const match = data.image_base64.match(/^data:([^;]+);base64,(.+)$/s)
+      const mime = match?.[1]?.startsWith('image/') ? match[1] : 'image/png'
+      const encoded = match ? match[2] : data.image_base64
+      let bytes
+      try {
+        const binary = atob(encoded)
+        bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+      } catch { return error('参考图数据无效') }
+      const form = new FormData()
+      form.append('model', model)
+      form.append('prompt',
+        'Color palette replacement ONLY. Keep the layout, composition, UI positions, sizes, shapes, icons, text and spacing identical. ' +
+        'Only change colors, backgrounds, highlights, borders and gradients. ' + data.prompt.trim())
+      form.append('size', '1536x1024')
+      form.append('n', '1')
+      form.append('image', new Blob([bytes], { type: mime }), 'reference.png')
+      response = await upstream(`${OPENAI_API_BASE}/images/edits`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}` },
+        body: form,
+        signal: AbortSignal.timeout(120000),
+      })
+    }
+  } catch {
+    return error('OpenAI API 暂时无法响应，请稍后重试', 504)
+  }
+
+  let result
+  try { result = await response.json() } catch { return error('OpenAI 返回了无法识别的数据', 502) }
+  if (!response.ok) return error(openAIError(result, `OpenAI API 请求失败（${response.status}）`), response.status)
+  const images = openAIImages(result)
+  return images.length ? json({ ok: true, images }) : error('OpenAI 未返回图片', 502)
+}
+
 export async function handleApi(request, env, upstream = fetch) {
   const url = new URL(request.url)
   const path = url.pathname
   if (path.startsWith('/api/figma/')) return handleFigmaApi(request, env, upstream)
+  if (path.startsWith('/api/openai/')) return handleOpenAIApi(request, env, upstream)
   const requestKey = request.headers.get('X-Jimeng-Api-Key')?.trim() || ''
   const defaultKey = env.JIMENG_API_KEY || env.ARK_API_KEY || ''
   const key = defaultKey || requestKey

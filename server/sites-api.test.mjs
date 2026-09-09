@@ -4,10 +4,14 @@ import { handleApi } from './sites-api.mjs'
 
 const env = { JIMENG_API_KEY: 'test-server-secret' }
 const figmaEnv = { FIGMA_API_TOKEN: 'test-figma-secret' }
+const openAIEnv = { OPENAI_API_KEY: 'test-openai-secret' }
 const request = (path, data, headers = {}) => new Request(`https://example.test/api/jimeng/${path}`, data === undefined ? { headers } : {
   method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data),
 })
 const figmaRequest = (path, headers = {}) => new Request(`https://example.test/api/figma/${path}`, { headers })
+const openAIRequest = (path, data, headers = {}) => new Request(`https://example.test/api/openai/${path}`, data === undefined ? { headers } : {
+  method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data),
+})
 
 test('default key stays server-side and status reflects upstream authentication', async () => {
   for (const [status, expected] of [[200, true], [401, false], [503, false]]) {
@@ -143,4 +147,42 @@ test('Figma routes reject missing credentials, invalid paths and unsafe image pr
     })
   assert.equal(image.status, 200)
   assert.equal(image.headers.get('Content-Type'), 'image/png')
+})
+
+test('OpenAI status and generation use the server default without exposing it', async () => {
+  const calls = []
+  const upstream = async (url, options) => {
+    calls.push({ url, auth: options.headers.Authorization })
+    return options.method === 'POST'
+      ? Response.json({ data: [{ b64_json: 'aW1hZ2U=' }] })
+      : Response.json({ id: 'gpt-image-1' })
+  }
+  const status = await handleApi(openAIRequest('status', undefined, { 'X-OpenAI-Api-Key': 'stale-browser-key' }), openAIEnv, upstream)
+  assert.equal((await status.json()).ok, true)
+  const generated = await handleApi(openAIRequest('text2image', { prompt: 'HMI dashboard' }), openAIEnv, upstream)
+  assert.deepEqual(await generated.json(), { ok: true, images: ['data:image/png;base64,aW1hZ2U='] })
+  assert.deepEqual(calls, [
+    { url: 'https://api.openai.com/v1/models/gpt-image-1', auth: `Bearer ${openAIEnv.OPENAI_API_KEY}` },
+    { url: 'https://api.openai.com/v1/images/generations', auth: `Bearer ${openAIEnv.OPENAI_API_KEY}` },
+  ])
+})
+
+test('manual OpenAI keys are validated separately and work as fallback', async () => {
+  const manualKey = 'manual-openai-key'
+  const upstream = async (_, options) => {
+    assert.equal(options.headers.Authorization, `Bearer ${manualKey}`)
+    return Response.json({ id: 'gpt-image-1' })
+  }
+  const saved = await handleApi(openAIRequest('save_key', { api_key: manualKey }, { 'X-OpenAI-Api-Key': manualKey }), openAIEnv, upstream)
+  assert.equal((await saved.json()).ok, true)
+  const status = await handleApi(openAIRequest('status', undefined, { 'X-OpenAI-Api-Key': manualKey }), {}, upstream)
+  assert.equal((await status.json()).ok, true)
+})
+
+test('OpenAI routes reject missing credentials and invalid requests without upstream calls', async () => {
+  const noCall = () => { throw new Error('unexpected upstream call') }
+  assert.equal((await handleApi(openAIRequest('text2image', { prompt: 'x' }), {}, noCall)).status, 503)
+  assert.equal((await handleApi(openAIRequest('text2image', {}), openAIEnv, noCall)).status, 400)
+  assert.equal((await handleApi(openAIRequest('image2image', { prompt: 'x' }), openAIEnv, noCall)).status, 400)
+  assert.equal((await handleApi(openAIRequest('save_key', {}), openAIEnv, noCall)).status, 400)
 })

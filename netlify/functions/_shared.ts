@@ -9,6 +9,15 @@ export function resolveJimengSaveKey(requestKey?: unknown): string {
 }
 export const STORED_VISION_ENDPOINT = 'ep-20260522095644-hdr5h'
 export const FIGMA_API_TOKEN = process.env.FIGMA_API_TOKEN || ''
+export const OPENAI_API_BASE = 'https://api.openai.com/v1'
+export const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1'
+export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
+export function resolveOpenAIApiKey(requestKey?: unknown): string {
+  return OPENAI_API_KEY || (typeof requestKey === 'string' ? requestKey.trim() : '')
+}
+export function resolveOpenAISaveKey(requestKey?: unknown): string {
+  return (typeof requestKey === 'string' ? requestKey.trim() : '')
+}
 // Tripo 3D 生成 API（异步任务模式）
 export const TRIPO_API_BASE = 'https://openapi.tripo3d.com/v3'
 export const TRIPO_DEFAULT_MODEL = 'v3.1-20260211'

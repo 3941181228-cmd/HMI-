@@ -29,7 +29,10 @@ interface ApiSettingsPanelProps {
 
 async function checkOpenAIStatus(): Promise<boolean> {
   try {
-    const res = await fetch('/api/openai/status')
+    const key = getStoredOpenAIKey().trim()
+    const res = await fetch('/api/openai/status', {
+      headers: key ? { 'X-OpenAI-Api-Key': key } : undefined,
+    })
     const data = await res.json()
     return !!data.ok
   } catch { return false }
@@ -68,7 +71,7 @@ async function saveOpenAIKey(apiKey: string): Promise<{ ok: boolean }> {
   try {
     const res = await fetch('/api/openai/save_key', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-OpenAI-Api-Key': apiKey },
       body: JSON.stringify({ api_key: apiKey }),
     })
     return await res.json()
@@ -215,19 +218,18 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
     if (!openaiKey.trim()) return
     setSavingOpenai(true)
     setMessage(null)
-    // 先保存到本地存储
-    saveOpenAIKeyLocal(openaiKey.trim())
-    const result = await saveOpenAIKey(openaiKey.trim())
+    const key = openaiKey.trim()
+    const result = await saveOpenAIKey(key)
     setSavingOpenai(false)
     if (result.ok) {
+      saveOpenAIKeyLocal(key)
       setOpenaiConnected(true)
       setMessage({ ok: true, text: 'OpenAI API Key 保存成功！' })
       notify({ app: 'aiGenerate', title: '保存成功', body: 'OpenAI API Key 已配置' })
     } else {
-      // 即使后端保存失败，本地也已保存
-      setOpenaiConnected(true)
-      setMessage({ ok: true, text: 'OpenAI API Key 已本地保存' })
-      notify({ app: 'aiGenerate', title: '已本地保存', body: 'OpenAI API Key 已保存到本地（后端同步失败）' })
+      setOpenaiConnected(false)
+      setMessage({ ok: false, text: 'OpenAI API Key 验证失败' })
+      notify({ app: 'aiGenerate', title: '验证失败', body: '请检查 OpenAI API Key 和模型权限' })
     }
   }
 
@@ -765,7 +767,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
               </div>
 
               <p className="text-[10px] text-muted-foreground leading-relaxed">
-                OpenAI 最新图像生成模型，支持文生图和参考图编辑，输出 1536×1024。
+                默认密钥由服务端安全提供；也可手动验证并仅保存在当前浏览器。
               </p>
 
               <a
@@ -784,7 +786,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
                   type={showOpenaiKey ? 'text' : 'password'}
                   value={openaiKey}
                   onChange={(e) => setOpenaiKey(e.target.value)}
-                  placeholder="sk-..."
+                  placeholder={openaiConnected ? '已启用默认 OpenAI API，无需填写' : 'sk-...'}
                   className="w-full h-9 pl-8 pr-9 text-xs bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--border))] rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/30"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSaveOpenAI() }}
                 />

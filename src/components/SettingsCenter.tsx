@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from './ui/button'
 import { themes as hmiThemes, type HMITheme, type HSLValue } from '@/data/themeData'
-import { getStoredFigmaToken, saveFigmaToken } from '@/services/apiStorage'
+import { getStoredFigmaToken, getStoredOpenAIKey, saveFigmaToken, saveOpenAIKey } from '@/services/apiStorage'
 import { checkLoginStatus, saveApiKey as saveJimengApiKey } from '@/services/jimeng'
 import { useSystemSettings } from '@/contexts/SystemSettingsContext'
 
@@ -168,14 +168,13 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       id: 'openai',
       name: 'OpenAI',
       icon: '🤖',
-      description: 'GPT-4o / DALL·E 3 图像生成',
+      description: 'GPT Image 文生图与参考图编辑',
       status: 'disconnected' as 'disconnected' | 'connecting' | 'connected',
       apiKey: '',
       endpoint: 'api.openai.com',
       basePath: '/v1/images/generations',
       models: [
-        { id: 'dall-e-3', name: 'DALL·E 3', desc: '高质量图像生成', recommended: true, status: 'available' as const },
-        { id: 'gpt-4o', name: 'GPT-4o', desc: '多模态理解与生成', recommended: false, status: 'available' as const },
+        { id: 'gpt-image-1', name: 'GPT Image 1', desc: '文生图与参考图编辑，1536×1024', recommended: true, status: 'active' as const },
       ],
     },
     {
@@ -258,7 +257,10 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'disconnected' as const } : p))
         }
       }).catch(() => setApiProviders(prev => prev.map(p => p.id === 'jimeng' ? { ...p, status: 'disconnected' as const } : p)))
-      fetch('/api/openai/status').then(r => r.json()).then(d => {
+      const savedOpenAIKey = getStoredOpenAIKey().trim()
+      fetch('/api/openai/status', {
+        headers: savedOpenAIKey ? { 'X-OpenAI-Api-Key': savedOpenAIKey } : undefined,
+      }).then(r => r.json()).then(d => {
         if (d.ok) {
           setApiProviders(prev => prev.map(p => p.id === 'openai' ? { ...p, status: 'connected' as const } : p))
         }
@@ -339,11 +341,12 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         if (apiKey) {
           const res = await fetch('/api/openai/save_key', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-OpenAI-Api-Key': apiKey },
             body: JSON.stringify({ api_key: apiKey }),
           })
           const data = await res.json()
           if (data.ok) {
+            saveOpenAIKey(apiKey)
             updateProvider(activeApiProvider, { status: 'connected' })
             localStorage.setItem('api_config_status', JSON.stringify({ provider: 'openai', configuredAt: Date.now() }))
             notify({ app: 'aiGenerate', title: '配置已保存', body: `${provider.name} API Key 已保存成功` })
@@ -392,7 +395,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
         }
         const res = await fetch('/api/openai/save_key', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-OpenAI-Api-Key': apiKey },
           body: JSON.stringify({ api_key: apiKey }),
         })
         const data = await res.json()
@@ -402,6 +405,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           updateProvider(activeApiProvider, { status: 'disconnected' })
           return
         }
+        saveOpenAIKey(apiKey)
       } else if (activeApiProvider === 'jimeng' || activeApiProvider === 'ark') {
         const data = await saveJimengApiKey(apiKey)
         if (!data.ok) {
