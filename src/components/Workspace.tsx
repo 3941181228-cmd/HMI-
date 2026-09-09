@@ -2197,12 +2197,12 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       const vs = await fetch('/api/hmi/vision_status')
       const vd = await vs.json()
       if (!vd.ok) {
-        setEditError('请先在设置中配置视觉模型推理接入点（Endpoint ID）')
+        setEditError(vd.message || vd.error || '默认视觉服务暂不可用，请稍后重试')
         setSettingsOpen(true)
         return
       }
     } catch {
-      setEditError('无法检查视觉模型配置')
+      setEditError('无法连接默认视觉服务，请检查网络后重试')
       setSettingsOpen(true)
       return
     }

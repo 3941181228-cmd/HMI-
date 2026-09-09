@@ -1,3 +1,4 @@
+import analyzeHmi from './hmi-analysis.mjs'
 const ARK_BASE = 'https://ark.cn-beijing.volces.com/api/v3'
 const DEFAULT_MODEL = 'doubao-seedream-5-0-260128'
 const FIGMA_API_BASE = 'https://api.figma.com/v1'
@@ -214,6 +215,14 @@ async function handleOpenAIApi(request, env, upstream) {
 export async function handleApi(request, env, upstream = fetch) {
   const url = new URL(request.url)
   const path = url.pathname
+  if (path === '/api/hmi/vision_status' && request.method === 'GET') {
+    const configured = !!(env.JIMENG_API_KEY || env.ARK_API_KEY)
+    return json({ ok: configured, configured, verified: false, source: 'server', message: configured ? '已使用服务端默认视觉接入点' : '服务端默认 API Key 未配置' })
+  }
+  if (path === '/api/hmi/analyze') {
+    const result = await analyzeHmi({ httpMethod: request.method, body: request.method === 'POST' ? await request.text() : '' }, env, upstream)
+    return new Response(result.body, { status: result.statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+  }
   if (path.startsWith('/api/figma/')) return handleFigmaApi(request, env, upstream)
   if (path.startsWith('/api/openai/')) return handleOpenAIApi(request, env, upstream)
   const requestKey = request.headers.get('X-Jimeng-Api-Key')?.trim() || ''
