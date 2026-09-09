@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Upload, Download, Loader2, X } from 'lucide-react'
 import { Button } from './ui/button'
-import type { SvgTraceOptions } from '../services/imageToSvg'
+import type { SvgcodeOptions, TraceProgress } from '../vendor/svgcode/trace'
 
 const presets = {
   icon: { label: '彩色图标', mode: 'color', colorCount: 16, turdSize: 0, alphaMax: 1, opttolerance: 0.1 },
@@ -13,8 +13,9 @@ const checker = { backgroundColor: '#25252d', backgroundImage: 'conic-gradient(#
 
 export default function VectorTracePanel() {
   const [source, setSource] = useState<{ url: string; name: string; width: number; height: number; pixels: ImageData } | null>(null)
-  const [options, setOptions] = useState<Partial<SvgTraceOptions>>({ ...presets.hmi, brightnessThreshold: 0.45 })
-  const [result, setResult] = useState<{ url: string; svg: string; count: number; seconds: string } | null>(null)
+  const [options, setOptions] = useState<SvgcodeOptions>({ ...presets.hmi, brightnessThreshold: 0.45, engine: 'svgcode', preserveColors: true, optimizeSvg: true, strokeWidth: 0 })
+  const [result, setResult] = useState<{ url: string; svg: string; count: number; seconds: string; engine: string; quantized: boolean; originalBytes: number } | null>(null)
+  const [progress, setProgress] = useState<TraceProgress | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [stale, setStale] = useState(false)
@@ -46,20 +47,21 @@ export default function VectorTracePanel() {
       setStale(false); setZoom(100)
     } catch (e) { URL.revokeObjectURL(url); if (id === revision.current) setError(e instanceof Error ? e.message : '图片读取失败') }
   }
-  function update(next: Partial<SvgTraceOptions>) { setOptions(o => ({ ...o, ...next })); if (result) setStale(true) }
+  function update(next: SvgcodeOptions) { setOptions(o => ({ ...o, ...next })); if (result) setStale(true) }
   function convert() {
     if (!source) return
-    stop(); setBusy(true); setError('')
+    stop(); setBusy(true); setError(''); setProgress({processed:0,total:1,stage:'准备转换'})
     const start = performance.now()
     try {
       const w = new Worker(new URL('../services/vectorTrace.worker.ts', import.meta.url), { type: 'module' }); worker.current = w
       timer.current = setTimeout(() => { stop(); setError('转换超时，请减少颜色数量或缩小图片后重试') }, 120000)
-      w.onmessage = ({ data }: MessageEvent<{ svg?: string; error?: string }>) => {
-        stop()
+      w.onmessage = ({ data }: MessageEvent<{ svg?: string; error?: string; progress?: TraceProgress; quantized?: boolean; originalBytes?: number; engine?: string }>) => {
+        if (data.progress) { setProgress(data.progress); return }
+        stop(); setProgress(null)
         if (!data.svg) { setError(data.error || '未生成有效结果'); return }
         const doc = new DOMParser().parseFromString(data.svg, 'image/svg+xml')
-        if (doc.querySelector('parsererror, image, script, foreignObject') || !doc.querySelector('path')) { setError('转换结果无效，请调整参数后重试'); return }
-        setResult({ svg: data.svg, url: URL.createObjectURL(new Blob([data.svg], { type: 'image/svg+xml' })), count: doc.querySelectorAll('path').length, seconds: ((performance.now() - start) / 1000).toFixed(1) }); setStale(false)
+        if (doc.querySelector('parsererror, image, script, foreignObject') || !doc.querySelector('path,rect,circle,ellipse,polygon,polyline')) { setError('转换结果无效，请调整参数后重试'); return }
+        setResult({ svg: data.svg, url: URL.createObjectURL(new Blob([data.svg], { type: 'image/svg+xml' })), engine: data.engine || 'hmi', quantized: !!data.quantized, originalBytes: data.originalBytes || new Blob([data.svg]).size, count: doc.querySelectorAll('path,rect,circle,ellipse,polygon,polyline').length, seconds: ((performance.now() - start) / 1000).toFixed(1) }); setStale(false)
       }
       w.onerror = () => { stop(); setError('矢量引擎加载失败，请刷新页面后重试') }
       const pixels = new Uint8ClampedArray(source.pixels.data)
@@ -75,6 +77,14 @@ export default function VectorTracePanel() {
         {source && <p className="break-all text-muted-foreground">{source.name}<br />{source.width} × {source.height} px</p>}
         <fieldset disabled={busy} className="space-y-5 disabled:opacity-50">
           <legend className="font-medium mb-3">描摹设置</legend>
+          <label className="block">转换引擎<select className="block w-full mt-2 bg-background border rounded-lg p-2" value={options.engine} onChange={e => update({ engine: e.target.value as 'svgcode' | 'hmi' })}><option value="svgcode">SVGcode · 逐色描摹</option><option value="hmi">HMI · 配色聚类</option></select></label>
+          {options.engine === 'svgcode' && <div className="space-y-3">
+            <label className="flex items-start gap-2"><input type="checkbox" checked={options.preserveColors} onChange={e => update({preserveColors:e.target.checked})} />优先保留原始 RGBA 颜色</label>
+            <p className="text-xs text-muted-foreground">128 色以内逐色保留；复杂图片自动按下方颜色数量归并。关闭后始终使用配色归并。</p>
+            <label className="block">描边补缝：{options.strokeWidth} px<input aria-label="描边补缝" type="range" className="block w-full mt-2" min="0" max="1" step="0.05" value={options.strokeWidth} onChange={e => update({strokeWidth:+e.target.value})} /></label>
+            <p className="text-xs text-muted-foreground">仅对不透明颜色扩展边缘。出现细缝时少量增加，细小图标建议保持 0。</p>
+          </div>}
+          <label className="flex items-center gap-2"><input type="checkbox" checked={options.optimizeSvg} onChange={e => update({optimizeSvg:e.target.checked})} />压缩 SVG（SVGO）</label>
           <div className="flex flex-wrap gap-2">{Object.entries(presets).map(([key, p]) => <button key={key} onClick={() => update(p)} className="border border-primary/30 rounded-lg px-3 py-2 hover:bg-primary/10">{p.label}</button>)}</div>
           <label className="block">描摹模式<select className="block w-full mt-2 bg-background border rounded-lg p-2" value={options.mode} onChange={e => update({ mode: e.target.value as 'color' | 'brightness' })}><option value="color">彩色 · 保留配色</option><option value="brightness">单色 · 黑色轮廓</option></select></label>
           {options.mode === 'color' ? <label className="block">颜色数量：{options.colorCount}<input aria-label="颜色数量" className="block w-full mt-2 accent-purple-500" type="range" min="2" max="64" value={options.colorCount} onChange={e => update({ colorCount: +e.target.value })} /></label> : <label className="block">亮度阈值：{options.brightnessThreshold}<input aria-label="亮度阈值" className="block w-full mt-2" type="range" min="0.05" max="0.95" step="0.05" value={options.brightnessThreshold} onChange={e => update({ brightnessThreshold: +e.target.value })} /></label>}
@@ -84,6 +94,7 @@ export default function VectorTracePanel() {
           <p className="text-muted-foreground text-xs leading-relaxed">平面图标、标识效果更好。照片、渐变和小字号文字会被近似描摹，文字不会自动恢复为可编辑文本。需要拆分界面元素时使用 AI 组件识别。</p>
         </fieldset>
         <Button variant="glow" className="w-full" onClick={convert} disabled={!source || busy}>{busy ? <><Loader2 size={16} className="animate-spin mr-2" />正在描摹…</> : result ? '重新转换' : '开始转换'}</Button>
+        {busy && progress && <div role="status" className="space-y-2"><p>{progress.stage} · {progress.processed}/{progress.total}</p><progress aria-label="转换进度" className="w-full" value={progress.processed} max={progress.total} /></div>}
         {busy && <Button variant="outline" className="w-full" onClick={stop}><X size={16} />取消转换</Button>}
       </div>
       <div className="glass rounded-xl p-4 space-y-4 min-w-0" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void upload(e.dataTransfer.files?.[0]) }}>
@@ -97,8 +108,10 @@ export default function VectorTracePanel() {
         </div>}
         {error && <p role="alert" className="text-red-400 p-3 border border-red-400/30 rounded-lg">{error}</p>}
         {stale && <p role="status" className="text-amber-400">参数已更改。当前预览为上一次结果，请重新转换后下载。</p>}
-        {result && <div className="flex flex-wrap justify-between gap-3 items-center"><p className="text-muted-foreground">{result.count} 个颜色路径 · {(new Blob([result.svg]).size / 1024).toFixed(1)} KB · {result.seconds} 秒</p><Button disabled={stale || busy} onClick={() => { const a = document.createElement('a'); a.href = result.url; a.download = `${source?.name.replace(/\.[^.]+$/, '') || 'vector'}.svg`; a.click() }}><Download size={16} className="mr-2" />下载 SVG</Button></div>}
+        {result && <p className="text-xs text-muted-foreground">{result.quantized ? '结果经过颜色归并，可提高颜色数量后重新转换。' : '结果保留输入中的独立颜色与透明度。'} 压缩前 {(result.originalBytes / 1024).toFixed(1)} KB。</p>}
+        {result && <div className="flex flex-wrap justify-between gap-3 items-center"><p className="text-muted-foreground">{result.engine === 'svgcode' ? 'SVGcode' : 'HMI'} · {result.count} 个矢量形状 · {(new Blob([result.svg]).size / 1024).toFixed(1)} KB · {result.seconds} 秒</p><Button disabled={stale || busy} onClick={() => { const a = document.createElement('a'); a.href = result.url; a.download = `${source?.name.replace(/\.[^.]+$/, '') || 'vector'}.svg`; a.click() }}><Download size={16} className="mr-2" />下载 SVG</Button></div>}
       </div>
     </div>
+    <p className="text-xs text-muted-foreground">SVGcode 适配版 · <a className="underline" href="https://github.com/tomayac/SVGcode" target="_blank" rel="noreferrer">原项目</a> · <a className="underline" href="https://github.com/3941181228-cmd/HMI-/tree/main/src/vendor/svgcode" target="_blank" rel="noreferrer">修改源码与 GPL 许可</a></p>
   </section>
 }

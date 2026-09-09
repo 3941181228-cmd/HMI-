@@ -408,7 +408,7 @@ function buildSvg(
       return `  <path d="${p.d}" fill="${p.fill}" fill-rule="evenodd"${op}/>`
     })
     .join('\n')
-  return `${svgHeader(width, height)}\n<g>\n${body}\n</g>${SVG_FOOTER}`
+  return `${svgHeader(width, height)}\n<g transform="translate(0,${height}) scale(0.1,-0.1)">\n${body}\n</g>${SVG_FOOTER}`
 }
 
 // ============== 后处理优化（参考 vectorizer.ai 输出特性）==============
