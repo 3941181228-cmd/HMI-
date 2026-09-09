@@ -155,14 +155,14 @@ test('OpenAI status and generation use the server default without exposing it', 
     calls.push({ url, auth: options.headers.Authorization })
     return options.method === 'POST'
       ? Response.json({ data: [{ b64_json: 'aW1hZ2U=' }] })
-      : Response.json({ id: 'gpt-image-1' })
+      : Response.json({ id: 'gpt-image-2' })
   }
   const status = await handleApi(openAIRequest('status', undefined, { 'X-OpenAI-Api-Key': 'stale-browser-key' }), openAIEnv, upstream)
   assert.equal((await status.json()).ok, true)
   const generated = await handleApi(openAIRequest('text2image', { prompt: 'HMI dashboard' }), openAIEnv, upstream)
   assert.deepEqual(await generated.json(), { ok: true, images: ['data:image/png;base64,aW1hZ2U='] })
   assert.deepEqual(calls, [
-    { url: 'https://api.openai.com/v1/models/gpt-image-1', auth: `Bearer ${openAIEnv.OPENAI_API_KEY}` },
+    { url: 'https://api.openai.com/v1/models/gpt-image-2', auth: `Bearer ${openAIEnv.OPENAI_API_KEY}` },
     { url: 'https://api.openai.com/v1/images/generations', auth: `Bearer ${openAIEnv.OPENAI_API_KEY}` },
   ])
 })
@@ -171,7 +171,7 @@ test('manual OpenAI keys are validated separately and work as fallback', async (
   const manualKey = 'manual-openai-key'
   const upstream = async (_, options) => {
     assert.equal(options.headers.Authorization, `Bearer ${manualKey}`)
-    return Response.json({ id: 'gpt-image-1' })
+    return Response.json({ id: 'gpt-image-2' })
   }
   const saved = await handleApi(openAIRequest('save_key', { api_key: manualKey }, { 'X-OpenAI-Api-Key': manualKey }), openAIEnv, upstream)
   assert.equal((await saved.json()).ok, true)

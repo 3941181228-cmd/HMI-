@@ -763,7 +763,7 @@ export default function ApiSettingsPanel({ open, onClose, activeTab: initialTab 
                 <div className="w-6 h-6 rounded-lg bg-[hsl(var(--surface-secondary))] flex items-center justify-center">
                   <Cpu size={12} className="text-muted-foreground" />
                 </div>
-                <span className="text-xs font-semibold text-foreground">OpenAI GPT-image-1</span>
+                <span className="text-xs font-semibold text-foreground">OpenAI GPT Image 2</span>
               </div>
 
               <p className="text-[10px] text-muted-foreground leading-relaxed">

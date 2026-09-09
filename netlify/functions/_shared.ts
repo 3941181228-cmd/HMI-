@@ -10,7 +10,7 @@ export function resolveJimengSaveKey(requestKey?: unknown): string {
 export const STORED_VISION_ENDPOINT = 'ep-20260522095644-hdr5h'
 export const FIGMA_API_TOKEN = process.env.FIGMA_API_TOKEN || ''
 export const OPENAI_API_BASE = 'https://api.openai.com/v1'
-export const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1'
+export const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
 export function resolveOpenAIApiKey(requestKey?: unknown): string {
   return OPENAI_API_KEY || (typeof requestKey === 'string' ? requestKey.trim() : '')

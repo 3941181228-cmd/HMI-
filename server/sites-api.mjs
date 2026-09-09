@@ -2,7 +2,7 @@ const ARK_BASE = 'https://ark.cn-beijing.volces.com/api/v3'
 const DEFAULT_MODEL = 'doubao-seedream-5-0-260128'
 const FIGMA_API_BASE = 'https://api.figma.com/v1'
 const OPENAI_API_BASE = 'https://api.openai.com/v1'
-const DEFAULT_OPENAI_IMAGE_MODEL = 'gpt-image-1'
+const DEFAULT_OPENAI_IMAGE_MODEL = 'gpt-image-2'
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } })

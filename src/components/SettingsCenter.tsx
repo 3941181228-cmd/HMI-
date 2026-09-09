@@ -174,7 +174,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       endpoint: 'api.openai.com',
       basePath: '/v1/images/generations',
       models: [
-        { id: 'gpt-image-1', name: 'GPT Image 1', desc: '文生图与参考图编辑，1536×1024', recommended: true, status: 'active' as const },
+        { id: 'gpt-image-2', name: 'GPT Image 2', desc: '文生图与参考图编辑，1536×1024', recommended: true, status: 'active' as const },
       ],
     },
     {
