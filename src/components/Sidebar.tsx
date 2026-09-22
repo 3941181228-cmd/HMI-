@@ -28,53 +28,53 @@ interface SidebarSection {
 const sections: SidebarSection[] = [
   {
     id: 'history',
-    icon: <Clock size={16} />,
+    icon: <Clock size={16} strokeWidth={2.25} />,
     title: '创作记录',
     items: ['最近项目', '历史方案', '自动保存', '版本记录'],
   },
   {
     id: 'ai-gen',
-    icon: <Sparkles size={16} />,
+    icon: <Sparkles size={16} strokeWidth={2.25} />,
     title: 'AI 生成',
     items: ['AI 生成 HMI', 'AI 生成壁纸', '3D 模型生成'],
     navigateTo: 'generate',
   },
   {
     id: 'hmi-edit',
-    icon: <PencilRuler size={16} />,
+    icon: <PencilRuler size={16} strokeWidth={2.25} />,
     title: 'HMI 编辑',
     items: [],
     navigateTo: 'edit',
   },
   {
     id: 'theme',
-    icon: <Palette size={16} />,
+    icon: <Palette size={16} strokeWidth={2.25} />,
     title: '主题工作室',
     items: ['AI 智能换色', 'Figma 一键换色'],
     navigateTo: 'theme:ai-recolor',
   },
   {
     id: 'wallpaper',
-    icon: <Image size={16} />,
+    icon: <Image size={16} strokeWidth={2.25} />,
     title: '壁纸引擎',
     items: ['动漫卡通类', '自然风光类', '抽象艺术类', '城市建筑类', '交通工具类', '动物植物类'],
   },
   {
     id: 'check',
-    icon: <ShieldCheck size={16} />,
+    icon: <ShieldCheck size={16} strokeWidth={2.25} />,
     title: 'AI 设计自检',
     items: ['导入检测', '布局对齐', '字体规范', '色彩对比', '间距系统'],
   },
   {
     id: 'export',
-    icon: <Download size={16} />,
+    icon: <Download size={16} strokeWidth={2.25} />,
     title: '导出中心',
     items: [],
     navigateTo: 'export',
   },
   {
     id: 'settings',
-    icon: <Settings size={16} />,
+    icon: <Settings size={16} strokeWidth={2.25} />,
     title: '系统设置',
     items: [],
     navigateTo: 'settings:theme',
@@ -266,10 +266,10 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
                 <button
                   onClick={() => handleSectionClick(section)}
                   className={cn(
-                    'w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group',
+                    'w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group',
                     isActive
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--foreground)/0.03)]'
+                      ? 'bg-primary/10 text-primary font-semibold'
+                      : 'font-medium text-foreground/80 hover:text-foreground hover:bg-[hsl(var(--foreground)/0.03)]'
                   )}
                 >
                   <span className={cn(
@@ -279,7 +279,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
                     {section.icon}
                   </span>
                   <span className="flex-1 text-left">{section.title}</span>
-                  <Sparkles size={12} className={cn(
+                  <Sparkles size={12} strokeWidth={2.25} className={cn(
                     'transition-all duration-200',
                     isActive ? 'text-primary' : 'text-primary/30 group-hover:text-primary/60'
                   )} />
@@ -293,10 +293,10 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
               <button
                 onClick={() => handleSectionClick(section)}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group',
+                  'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200 group',
                   isActive
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--foreground)/0.03)]'
+                    ? 'bg-primary/10 text-primary font-semibold'
+                    : 'font-medium text-foreground/80 hover:text-foreground hover:bg-[hsl(var(--foreground)/0.03)]'
                 )}
               >
                 <span className={cn(
@@ -307,7 +307,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
                 </span>
                 <span className="flex-1 text-left">{section.title}</span>
                 {section.id === 'history' && historyRecords.length > 0 && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary mr-1">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary mr-1 font-semibold">
                     {historyRecords.length}
                   </span>
                 )}
@@ -316,7 +316,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
                   transition={{ duration: 0.2 }}
                   className="text-muted-foreground/50"
                 >
-                  <ChevronDown size={12} />
+                  <ChevronDown size={12} strokeWidth={2.5} />
                 </motion.span>
               </button>
 
@@ -411,6 +411,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
                           >
                             <ChevronRight
                               size={10}
+                              strokeWidth={2.5}
                               className={cn(
                                 'shrink-0 transition-transform duration-200',
                                 activeItem === item ? 'text-primary' : 'text-muted-foreground/30'

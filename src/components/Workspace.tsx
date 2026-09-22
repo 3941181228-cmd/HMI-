@@ -1,4 +1,3 @@
-import VectorTracePanel from './VectorTracePanel'
 import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -50,6 +49,14 @@ import type { HMITheme } from '@/data/themeData'
 import { animeWallpapers, animeTags, natureWallpapers, natureTags, abstractWallpapers, abstractTags, cityWallpapers, cityTags, vehicleWallpapers, vehicleTags, animalWallpapers, animalTags, wallpaperCategories } from '@/data/wallpaperData'
 import { getStoredFigmaToken, getStoredOpenAIKey } from '@/services/apiStorage'
 import { fetchFigmaImageAsBlob, getProxiedFigmaImageUrl } from '@/services/figmaImageProxy'
+// HMI Studio Skill — 专业车载 HMI 页面生成提示词包
+import {
+  HMI_SCENARIOS,
+  HMI_STYLE_PRESETS,
+  HMI_COMPONENT_LIBRARY,
+  HMI_QUICK_PROMPTS,
+  buildHMIPrompt,
+} from '@/skills/hmi-studio'
 import {
   checkAndVerifyImage, adjustImageToSize,
   type CheckAndVerifyResult, type PresetSize,
@@ -242,6 +249,9 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     }
   }
   const [wallpaperRes, setWallpaperRes] = useState('1920×1080')
+  const [wallpaperCustomSize, setWallpaperCustomSize] = useState(false)
+  const [wallpaperCustomWidth, setWallpaperCustomWidth] = useState(1920)
+  const [wallpaperCustomHeight, setWallpaperCustomHeight] = useState(1080)
   const WALLPAPER_RESOLUTIONS = [
     { label: '1920×1080 (Full HD)', w: 1920, h: 1080, ratio: '16:9' },
     { label: '2560×1440 (2K)', w: 2560, h: 1440, ratio: '16:9' },
@@ -253,11 +263,15 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   const [engine, setEngine] = useState<'jimeng' | 'openai'>('jimeng')
   const [genRatio, setGenRatio] = useState<string>('16:9')
   const [genResolution, setGenResolution] = useState<string>('1920×1080')
+  const [ratioPickerOpen, setRatioPickerOpen] = useState(false)
   const [genCustomSize, setGenCustomSize] = useState(false)
+  // HMI Studio Skill 状态 — 场景 / 风格 / 组件
+  const [hmiScenario, setHmiScenario] = useState<string>('home')
+  const [hmiStyle, setHmiStyle] = useState<string>('通用科技风')
+  const [hmiComponents, setHmiComponents] = useState<string[]>(['导航地图', '车辆状态', '底部Dock'])
+  const [hmiComponentsOpen, setHmiComponentsOpen] = useState(false)
   const [genCustomWidth, setGenCustomWidth] = useState(1920)
   const [genCustomHeight, setGenCustomHeight] = useState(1080)
-  const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false)
-  const [editWorkflow, setEditWorkflow] = useState<'trace' | 'ai'>('trace')
   const [editSubMode, setEditSubMode] = useState<'png2svg' | 'text_extract'>('png2svg')
   const [editImage, setEditImage] = useState<string | null>(null)
   const [editImageName, setEditImageName] = useState('')
@@ -280,6 +294,8 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     outputFormat: 'png' as const,
     keepTransparency: true,
   }
+  // 导出倍率（1x / 2x / 3x）
+  const [exportScale, setExportScale] = useState<1 | 2 | 3>(2)
   // 整体进度（用于显示当前导出第几张、当前帧名）
   const [exportOverallProgress, setExportOverallProgress] = useState<{ current: number; total: number; currentFrame?: string; phase: 'idle' | 'fetching' | 'encoding' | 'zipping' | 'saving' | 'done' } | null>(null)
   // 导出错误提示
@@ -310,7 +326,9 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   
   // Parse Figma URL to extract file key and generate frames
   const parseFigmaUrl = (url: string): { fileKey: string | null; fileName: string; frames: string[] } => {
-    const match = url.match(/figma\.com\/design\/([a-zA-Z0-9]+)/)
+    // 支持多种 Figma URL 格式：
+    // /design/ (新版设计文件)、/file/ (旧版设计文件)、/proto/ (原型)、/board/ (白板)、/proto/ (原型)
+    const match = url.match(/figma\.com\/(?:design|file|proto|board)\/([a-zA-Z0-9]+)/)
     const fileKey = match ? match[1] : null
     const urlParts = url.split('/')
     const fileName = urlParts.pop()?.replace(/-/g, ' ') || 'HMI Dashboard'
@@ -376,7 +394,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     
     if (!fileKey) {
       setIsConnecting(false)
-      alert('无效的 Figma URL')
+      setExportErrorMessage('无法解析 Figma 链接，请确认链接格式正确。\n支持的格式：https://www.figma.com/design/XXXXX 或 https://www.figma.com/file/XXXXX')
       return
     }
     
@@ -505,21 +523,14 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       
     } catch (error) {
       console.error('Figma API error:', error)
-      // API失败时不生成静态死图，显示错误状态
-      const { frames } = parseFigmaUrl(figmaUrl)
-      setFigmaFrames(frames.length > 0 ? frames : DEFAULT_FRAMES)
-      setSelectedFrames([...new Set(frames.length > 0 ? frames : DEFAULT_FRAMES)])
-      setFigmaFileInfo({
-        name: `${fileName}.fig`,
-        page: '主页面',
-        lastModified: new Date().toLocaleDateString('zh-CN'),
-        fileKey: fileKey || 'unknown',
-      })
-      setFigmaConnected(true)
       setIsConnecting(false)
       setAnalyzingStep(-1)
       setAnalyzingStatus('')
-      // 不生成静态预览图，framePreviews保持为空，UI会显示加载/错误状态
+      // API 失败时不设置 figmaConnected，显示错误提示
+      const errMsg = error instanceof Error
+        ? `Figma 连接失败：${error.message}（可能是 Token 无效或已过期，请检查设置中心中的 Figma Token）`
+        : 'Figma 连接失败，请检查网络和 Token 后重试'
+      setExportErrorMessage(errMsg)
     }
   }
   
@@ -940,8 +951,9 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     }
     const currentToken = getStoredFigmaToken()
 
-    // 2. 准备配置参数（使用默认配置）
-    const { scale, quality, outputFormat, keepTransparency } = PNG_EXPORT_DEFAULTS
+    // 2. 准备配置参数（使用用户选择的倍率）
+    const { quality, outputFormat, keepTransparency } = PNG_EXPORT_DEFAULTS
+    const scale = exportScale
     const projectName = (figmaFileInfo?.name?.replace('.fig', '') || 'HMI Export').trim() || 'HMI Export'
     const ext = outputFormat === 'png' ? 'png' : 'jpg'
 
@@ -1778,8 +1790,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   }
 
   const handleGenerate = async () => {
-    if (!promptInput.trim() && !refImage) return
-
+    // HMI Studio Skill：即使无输入也可按 场景/风格/组件 生成专业 HMI 页面
     if (!isLoggedIn) {
       navigate('/login?return=/workspace')
       return
@@ -1846,15 +1857,26 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       // 获取当前选择的尺寸（仅即梦引擎支持自定义尺寸）
       const presetSize = engine === 'jimeng' ? buildPresetSizeFromSelection() : undefined
 
+      // HMI Studio Skill：按 场景/风格/组件 构建专业 HMI 生图提示词
+      // （用户输入框内容作为"用户需求"嵌入模板，为空时使用场景默认描述）
+      const finalPrompt = buildHMIPrompt({
+        request: promptInput,
+        scenario: hmiScenario,
+        style: hmiStyle,
+        components: hmiComponents,
+        screenSize: presetSize ? `${presetSize.width}x${presetSize.height}` : undefined,
+        referenceMode: !!refImage,
+      })
+
       if (engine === 'openai') {
         const r = await generateOpenAI(
-          promptInput || '参考这张图片的风格生成智能座舱HMI界面',
+          finalPrompt,
           refImage || undefined,
         )
         result = { success: r.ok, images: r.images, error: r.error }
       } else {
         const r = await generateWithPoll(
-          promptInput || '参考这张图片的风格生成智能座舱HMI界面',
+          finalPrompt,
           refImage || undefined,
           undefined,
           presetSize?.apiSize,
@@ -1972,16 +1994,29 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
     try {
       let result: { success: boolean; images: string[]; error?: string }
 
+      // 构建壁纸尺寸：自定义尺寸优先，否则用预设分辨率
+      const wallpaperSizeStr = wallpaperCustomSize
+        ? `${wallpaperCustomWidth}x${wallpaperCustomHeight}`
+        : (() => {
+            const preset = WALLPAPER_RESOLUTIONS.find(r => r.label === wallpaperRes)
+            return preset ? `${preset.w}x${preset.h}` : wallpaperRes.replace('×', 'x')
+          })()
+      const wallpaperResDisplay = wallpaperCustomSize
+        ? `${wallpaperCustomWidth}×${wallpaperCustomHeight}`
+        : wallpaperRes
+
       if (engine === 'openai') {
         const r = await generateOpenAI(
-          `${wallpaperPrompt}，高画质桌面壁纸，${wallpaperRes}分辨率`,
+          `${wallpaperPrompt}，高画质桌面壁纸，${wallpaperResDisplay}分辨率`,
           undefined,
         )
         result = { success: r.ok, images: r.images, error: r.error }
       } else {
         const r = await generateWithPoll(
-          `${wallpaperPrompt}，高画质桌面壁纸，${wallpaperRes}分辨率`,
+          `${wallpaperPrompt}，高画质桌面壁纸，${wallpaperResDisplay}分辨率`,
           undefined,
+          undefined,
+          wallpaperSizeStr,
         )
         result = r
       }
@@ -2456,136 +2491,235 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
               </div>
 
               {/* Prompt Input */}
-              <div className="glass rounded-xl p-4 space-y-3">
+              <div className="glass rounded-xl p-4 space-y-4">
+                {/* 标题栏 */}
                 <div className="flex items-center gap-2 text-xs text-primary">
                   <Wand2 size={12} />
                   <span>AI Prompt</span>
                 </div>
+
+                {/* 提示词输入 */}
                 <textarea
                   value={promptInput}
                   onChange={(e) => setPromptInput(e.target.value)}
                   placeholder="描述你想要的座舱界面，例如：设计一套极简风格的仪表盘界面，深色主题，包含速度、电量、导航、媒体控制..."
                   className="w-full h-28 bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-[hsl(var(--primary)/0.3)] focus:ring-1 focus:ring-[hsl(var(--primary)/0.15)] resize-none transition-all duration-200"
                 />
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <button
-                        onClick={() => setSizeDropdownOpen(v => !v)}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] text-[10px] text-foreground hover:border-[hsl(var(--primary)/0.2)] transition-all duration-200"
+
+                {/* HMI Studio Skill 配置 — 场景 / 风格 / 组件 */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground">场景与风格</span>
+                    <span className="text-[10px] text-primary/50 flex items-center gap-1">
+                      <Component size={9} />
+                      HMI Studio
+                    </span>
+                  </div>
+
+                  {/* 场景 + 风格选择 */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <select
+                      value={hmiScenario}
+                      onChange={(e) => {
+                        const id = e.target.value
+                        setHmiScenario(id)
+                        // 切换场景时重置为该场景的默认组件
+                        const def = HMI_SCENARIOS.find(s => s.id === id)
+                        if (def) setHmiComponents(def.defaultComponents)
+                      }}
+                      className="w-full h-8 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] px-2 text-[11px] text-foreground focus:outline-none focus:border-primary/40 cursor-pointer"
+                    >
+                      {HMI_SCENARIOS.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={hmiStyle}
+                      onChange={(e) => setHmiStyle(e.target.value)}
+                      className="w-full h-8 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] px-2 text-[11px] text-foreground focus:outline-none focus:border-primary/40 cursor-pointer"
+                    >
+                      {Object.entries(HMI_STYLE_PRESETS).map(([name, preset]) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 组件选择 — 展开式多选 chips */}
+                  <button
+                    onClick={() => setHmiComponentsOpen(v => !v)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] hover:border-[hsl(var(--primary)/0.2)] transition-all duration-200"
+                  >
+                    <span className="text-[11px] text-foreground truncate flex-1 text-left">
+                      {hmiComponents.length > 0 ? `已选 ${hmiComponents.length} 个组件` : '选择页面组件'}
+                    </span>
+                    <ChevronDown size={12} className={`text-muted-foreground transition-transform duration-200 ${hmiComponentsOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  <AnimatePresence>
+                    {hmiComponentsOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
                       >
-                        {genCustomSize ? (
-                          <>⚙ 自定义 {genCustomWidth}×{genCustomHeight}</>
-                        ) : (
-                          <>{SIZE_PRESETS.find(p => p.ratio === genRatio)?.icon} {genRatio} · {genResolution}</>
-                        )}
-                        <ChevronDown size={10} className={`transition-transform duration-200 ${sizeDropdownOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      <AnimatePresence>
-                        {sizeDropdownOpen && (
-                          <>
-                            <div className="fixed inset-0 z-40" onClick={() => setSizeDropdownOpen(false)} />
-                            <motion.div
-                              initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                              transition={{ duration: 0.15 }}
-                              className="absolute top-full left-0 mt-1 z-50 min-w-[220px] rounded-xl bg-[hsl(var(--surface)/0.95)] backdrop-blur-xl border border-[hsl(var(--foreground)/0.08)] shadow-xl shadow-black/20 overflow-hidden"
-                            >
-                              {SIZE_PRESETS.map((preset) => {
-                                const isActive = !genCustomSize && genRatio === preset.ratio
-                                return (
-                                  <div key={preset.ratio}>
+                        <div className="space-y-2 pt-1 px-1">
+                          {Object.entries(HMI_COMPONENT_LIBRARY).map(([category, comps]) => (
+                            <div key={category} className="space-y-1">
+                              <div className="text-[10px] text-muted-foreground/70">{category}</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {comps.map(comp => {
+                                  const selected = hmiComponents.includes(comp)
+                                  return (
                                     <button
+                                      key={comp}
                                       onClick={() => {
-                                        setGenRatio(preset.ratio)
-                                        setGenResolution(preset.resolutions[0])
-                                        setGenCustomSize(false)
-                                        setSizeDropdownOpen(false)
+                                        setHmiComponents(prev =>
+                                          selected ? prev.filter(c => c !== comp) : [...prev, comp]
+                                        )
                                       }}
-                                      className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all duration-150 ${
-                                        isActive
-                                          ? 'bg-primary/10 text-primary'
-                                          : 'text-foreground hover:bg-[hsl(var(--foreground)/0.04)]'
+                                      className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-all duration-150 ${
+                                        selected
+                                          ? 'bg-primary/15 text-primary border border-primary/25'
+                                          : 'bg-[hsl(var(--surface-secondary)/0.4)] text-muted-foreground border border-transparent hover:text-foreground'
                                       }`}
                                     >
-                                      <span className="text-xs w-5 text-center">{preset.icon}</span>
-                                      <span className="text-[11px] font-medium flex-1">{preset.ratio}</span>
-                                      {isActive && <CheckCircle2 size={10} className="text-primary" />}
+                                      {comp}
                                     </button>
-                                    {isActive && (
-                                      <div className="flex items-center gap-1 px-3 pb-2 pl-10">
-                                        {preset.resolutions.map((res) => (
-                                          <button
-                                            key={res}
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              setGenResolution(res)
-                                            }}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-150 ${
-                                              genResolution === res
-                                                ? 'bg-primary/15 text-primary border border-primary/25'
-                                                : 'bg-[hsl(var(--surface-secondary)/0.4)] text-muted-foreground border border-transparent hover:text-foreground'
-                                            }`}
-                                          >
-                                            {res}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                              <div className="border-t border-[hsl(var(--foreground)/0.06)]">
-                                <button
-                                  onClick={() => {
-                                    setGenCustomSize(true)
-                                    setSizeDropdownOpen(false)
-                                  }}
-                                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all duration-150 ${
-                                    genCustomSize
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'text-foreground hover:bg-[hsl(var(--foreground)/0.04)]'
-                                  }`}
-                                >
-                                  <span className="text-xs w-5 text-center">⚙</span>
-                                  <span className="text-[11px] font-medium flex-1">自定义尺寸</span>
-                                  {genCustomSize && <CheckCircle2 size={10} className="text-primary" />}
-                                </button>
-                                {genCustomSize && (
-                                  <div className="flex items-center gap-1.5 px-3 pb-2 pl-10">
-                                    <input
-                                      type="number"
-                                      value={genCustomWidth}
-                                      onChange={(e) => setGenCustomWidth(Math.max(256, Math.min(4096, parseInt(e.target.value) || 256)))}
-                                      className="w-16 h-6 rounded-md bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-[10px] text-foreground text-center focus:outline-none focus:border-primary/40"
-                                      min={256}
-                                      max={4096}
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                    <span className="text-[10px] text-muted-foreground">×</span>
-                                    <input
-                                      type="number"
-                                      value={genCustomHeight}
-                                      onChange={(e) => setGenCustomHeight(Math.max(256, Math.min(4096, parseInt(e.target.value) || 256)))}
-                                      className="w-16 h-6 rounded-md bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-[10px] text-foreground text-center focus:outline-none focus:border-primary/40"
-                                      min={256}
-                                      max={4096}
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                    <span className="text-[9px] text-muted-foreground/50">px</span>
-                                  </div>
-                                )}
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                          {/* 恢复场景默认组件 */}
+                          <button
+                            onClick={() => {
+                              const def = HMI_SCENARIOS.find(s => s.id === hmiScenario)
+                              if (def) setHmiComponents(def.defaultComponents)
+                            }}
+                            className="text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+                          >
+                            恢复该场景默认组件
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* 比例尺寸选择 — 参照即梦 AI 风格，默认收起，点击展开 */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground">画面比例</span>
+                    <button
+                      onClick={() => { setGenCustomSize(!genCustomSize); setRatioPickerOpen(false) }}
+                      className={`text-[10px] transition-colors ${genCustomSize ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {genCustomSize ? '使用预设比例' : '自定义尺寸'}
+                    </button>
+                  </div>
+
+                  {/* 预设比例 — 收起状态：显示当前选中比例的紧凑按钮 */}
+                  {!genCustomSize && (() => {
+                    const currentSize = JIMENG_SUPPORTED_SIZES[genRatio]
+                    const isLandscape = currentSize ? currentSize.w >= currentSize.h : true
+                    return (
+                      <div className="space-y-2">
+                        {/* 收起时的比例显示按钮 — 点击展开 */}
+                        <button
+                          onClick={() => setRatioPickerOpen(v => !v)}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] hover:border-[hsl(var(--primary)/0.2)] transition-all duration-200"
+                        >
+                          <span
+                            className="block border-2 border-primary rounded-sm shrink-0"
+                            style={{
+                              width: isLandscape ? '20px' : '13px',
+                              height: isLandscape ? '13px' : '20px',
+                            }}
+                          />
+                          <span className="text-[11px] font-medium text-foreground">{genRatio}</span>
+                          {currentSize && (
+                            <span className="text-[10px] text-muted-foreground/70">2K · {currentSize.w}×{currentSize.h}</span>
+                          )}
+                          <ChevronDown size={12} className={`ml-auto text-muted-foreground transition-transform duration-200 ${ratioPickerOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {/* 展开后的比例选择网格 */}
+                        <AnimatePresence>
+                          {ratioPickerOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="grid grid-cols-4 gap-1.5 pt-1">
+                                {Object.entries(JIMENG_SUPPORTED_SIZES).map(([ratio, size]) => {
+                                  const isActive = genRatio === ratio
+                                  const landscape = size.w >= size.h
+                                  return (
+                                    <button
+                                      key={ratio}
+                                      onClick={() => {
+                                        setGenRatio(ratio)
+                                        setGenResolution(`${size.w}×${size.h}`)
+                                        setRatioPickerOpen(false)
+                                      }}
+                                      className={`flex flex-col items-center gap-1 py-2 rounded-lg transition-all duration-150 ${
+                                        isActive
+                                          ? 'bg-primary/15 text-primary border border-primary/25'
+                                          : 'bg-[hsl(var(--surface-secondary)/0.5)] text-muted-foreground border border-transparent hover:text-foreground hover:border-[hsl(var(--primary)/0.15)]'
+                                      }`}
+                                    >
+                                      <span
+                                        className={`block border-2 rounded-sm ${isActive ? 'border-primary' : 'border-muted-foreground/40'}`}
+                                        style={{
+                                          width: landscape ? '22px' : '14px',
+                                          height: landscape ? '14px' : '22px',
+                                        }}
+                                      />
+                                      <span className="text-[11px] font-medium">{ratio}</span>
+                                    </button>
+                                  )
+                                })}
                               </div>
                             </motion.div>
-                          </>
-                        )}
-                      </AnimatePresence>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )
+                  })()}
+
+                  {/* 自定义尺寸输入 */}
+                  {genCustomSize && (
+                    <div className="flex items-center gap-2 px-1">
+                      <input
+                        type="number"
+                        value={genCustomWidth}
+                        onChange={(e) => setGenCustomWidth(parseInt(e.target.value) || 0)}
+                        className="w-20 h-8 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-xs text-foreground text-center focus:outline-none focus:border-primary/40"
+                      />
+                      <span className="text-xs text-muted-foreground">×</span>
+                      <input
+                        type="number"
+                        value={genCustomHeight}
+                        onChange={(e) => setGenCustomHeight(parseInt(e.target.value) || 0)}
+                        className="w-20 h-8 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-xs text-foreground text-center focus:outline-none focus:border-primary/40"
+                      />
+                      <span className="text-[10px] text-muted-foreground/50">px</span>
                     </div>
-                    <span className="px-1.5 py-0.5 rounded bg-primary/5 border border-primary/10 text-primary text-[10px]">{engine === 'jimeng' ? '即梦引擎' : 'GPT 图像'}</span>
+                  )}
+                </div>
+
+                {/* 底部操作栏 */}
+                <div className="flex items-center justify-between pt-1 border-t border-[hsl(var(--foreground)/0.06)]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-md bg-primary/5 border border-primary/10 text-primary text-[10px] font-medium">{engine === 'jimeng' ? '即梦引擎' : 'GPT 图像'}</span>
                     {refImage && (
-                      <span className="px-1.5 py-0.5 rounded bg-primary/5 border border-primary/10 text-primary text-[10px] flex items-center gap-0.5">
-                        <ImageIcon size={8} />
+                      <span className="px-2 py-0.5 rounded-md bg-primary/5 border border-primary/10 text-primary text-[10px] font-medium flex items-center gap-1">
+                        <ImageIcon size={9} />
                         参考图
                       </span>
                     )}
@@ -2594,7 +2728,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                     variant="glow"
                     size="sm"
                     onClick={handleGenerate}
-                    disabled={isGenerating || (!promptInput.trim() && !refImage)}
+                    disabled={isGenerating}
                     className="gap-1.5"
                   >
                     {isGenerating ? (
@@ -2617,24 +2751,27 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                 </div>
               </div>
 
-              {/* Quick Prompts */}
+              {/* Quick Prompts — HMI 页面级预设（来自 HMI Studio Skill，点击联动场景） */}
               <div className="space-y-2">
                 <span className="text-xs text-muted-foreground">快捷提示词</span>
                 <div className="flex flex-wrap gap-2">
-                  {[
-                    '极简风格仪表盘',
-                    '保时捷 HMI 简约座舱',
-                    '特斯拉极简中控',
-                    '蔚来空间感 UI',
-                    '未来科技座舱',
-                    '豪华新能源界面',
-                  ].map((prompt) => (
+                  {HMI_QUICK_PROMPTS.map((qp) => (
                     <button
-                      key={prompt}
-                      onClick={() => setPromptInput(prompt)}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.06)] text-muted-foreground hover:text-foreground hover:border-[hsl(var(--primary)/0.2)] transition-all duration-200"
+                      key={qp.label}
+                      onClick={() => {
+                        // 填入完整用户需求，并联动切换到对应场景 + 重置默认组件
+                        setPromptInput(qp.request)
+                        setHmiScenario(qp.scenario)
+                        const def = HMI_SCENARIOS.find(s => s.id === qp.scenario)
+                        if (def) setHmiComponents(def.defaultComponents)
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 ${
+                        hmiScenario === qp.scenario
+                          ? 'bg-primary/10 text-primary border-primary/25'
+                          : 'bg-[hsl(var(--surface-secondary)/0.5)] border-[hsl(var(--foreground)/0.06)] text-muted-foreground hover:text-foreground hover:border-[hsl(var(--primary)/0.2)]'
+                      }`}
                     >
-                      {prompt}
+                      {qp.label}
                     </button>
                   ))}
                 </div>
@@ -2792,14 +2929,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
           </motion.div>
           )}
 
-          {activeTab === 'edit' && editSubMode === 'png2svg' && (
-            <div className="max-w-6xl mx-auto mb-5 flex gap-3">
-              <Button variant={editWorkflow === 'trace' ? 'glow' : 'outline'} onClick={() => setEditWorkflow('trace')}>位图矢量描摹</Button>
-              <Button variant={editWorkflow === 'ai' ? 'glow' : 'outline'} onClick={() => setEditWorkflow('ai')}>AI 组件识别</Button>
-            </div>
-          )}
-          {activeTab === 'edit' && editSubMode === 'png2svg' && editWorkflow === 'trace' && <VectorTracePanel />}
-          {activeTab === 'edit' && (editSubMode !== 'png2svg' || editWorkflow === 'ai') && (
+          {activeTab === 'edit' && (
             <motion.div
               key="edit"
               initial={{ opacity: 0, y: 8 }}
@@ -4217,6 +4347,27 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                   <div className="col-span-3 space-y-4">
                     <div className="glass rounded-xl border border-white/10 p-4">
                       <h4 className="text-xs font-medium text-foreground mb-3">导出选项</h4>
+
+                      {/* 倍率选择 */}
+                      <div className="mb-3">
+                        <div className="text-[10px] text-muted-foreground mb-1.5">图片倍率</div>
+                        <div className="flex gap-1.5">
+                          {([1, 2, 3] as const).map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => setExportScale(s)}
+                              className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 ${
+                                exportScale === s
+                                  ? 'bg-primary/15 text-primary border border-primary/25'
+                                  : 'bg-[hsl(var(--surface-secondary)/0.5)] text-muted-foreground border border-transparent hover:text-foreground hover:border-[hsl(var(--primary)/0.15)]'
+                              }`}
+                            >
+                              {s}x
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
                       <div className="space-y-2">
                         {/* PNG 导出 — 点击直接开始导出 */}
                         <motion.button
@@ -4239,7 +4390,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                           </span>
                           <div className="flex-1">
                             <div className="text-xs font-medium text-foreground">PNG 导出</div>
-                            <div className="text-[10px] text-muted-foreground">逐 Frame 导出 · 2x · 保留透明度</div>
+                            <div className="text-[10px] text-muted-foreground">逐 Frame 导出 · {exportScale}x · 保留透明度</div>
                           </div>
                         </motion.button>
                       </div>
@@ -4606,9 +4757,9 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                       {WALLPAPER_RESOLUTIONS.map((res) => (
                         <button
                           key={res.label}
-                          onClick={() => setWallpaperRes(res.label)}
+                          onClick={() => { setWallpaperCustomSize(false); setWallpaperRes(res.label) }}
                           className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-all duration-200 ${
-                            wallpaperRes === res.label
+                            !wallpaperCustomSize && wallpaperRes === res.label
                               ? 'bg-primary/15 text-primary'
                               : 'text-muted-foreground hover:text-foreground'
                           }`}
@@ -4617,8 +4768,37 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                           {res.label}
                         </button>
                       ))}
+                      <button
+                        onClick={() => setWallpaperCustomSize(v => !v)}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-all duration-200 ${
+                          wallpaperCustomSize
+                            ? 'bg-primary/15 text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        自定义尺寸
+                      </button>
                     </div>
                   </div>
+                  {/* 自定义尺寸输入 */}
+                  {wallpaperCustomSize && (
+                    <div className="flex items-center justify-center gap-2 mt-2">
+                      <input
+                        type="number"
+                        value={wallpaperCustomWidth}
+                        onChange={(e) => setWallpaperCustomWidth(parseInt(e.target.value) || 0)}
+                        className="w-20 h-8 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-xs text-foreground text-center focus:outline-none focus:border-primary/40"
+                      />
+                      <span className="text-xs text-muted-foreground">×</span>
+                      <input
+                        type="number"
+                        value={wallpaperCustomHeight}
+                        onChange={(e) => setWallpaperCustomHeight(parseInt(e.target.value) || 0)}
+                        className="w-20 h-8 rounded-lg bg-[hsl(var(--surface-secondary)/0.5)] border border-[hsl(var(--foreground)/0.08)] px-2 text-xs text-foreground text-center focus:outline-none focus:border-primary/40"
+                      />
+                      <span className="text-[10px] text-muted-foreground/50">px</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -4681,7 +4861,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                     <span className="text-[11px] text-red-400">{wallpaperError}</span>
                   )}
                   <span className="text-[10px] text-muted-foreground/60">
-                    当前分辨率：{wallpaperRes}
+                    当前分辨率：{wallpaperCustomSize ? `${wallpaperCustomWidth}×${wallpaperCustomHeight}` : wallpaperRes}
                   </span>
                 </div>
               </div>

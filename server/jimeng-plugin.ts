@@ -82,7 +82,17 @@ async function callArkAPI(apiKey: string, requestBody: Record<string, unknown>):
   }
 }
 
-export function jimengServerPlugin(): Plugin {
+export function jimengServerPlugin(env?: Record<string, string>): Plugin {
+  // 从 vite.config.ts 传入的 loadEnv 结果初始化内存中的 API Key
+  // （Vite 不会把 .env 注入 process.env，必须显式传入）
+  if (env) {
+    if (env.ARK_API_KEY) storedApiKey = env.ARK_API_KEY
+    if (env.JIMENG_API_KEY) storedApiKey = env.JIMENG_API_KEY
+    if (env.OPENAI_API_KEY) storedOpenAIKey = env.OPENAI_API_KEY
+    if (env.FIGMA_API_TOKEN) storedFigmaKey = env.FIGMA_API_TOKEN
+    if (env.TRIPO_API_KEY) storedTripoKey = env.TRIPO_API_KEY
+    if (env.VISION_ENDPOINT_ID) storedVisionEndpoint = env.VISION_ENDPOINT_ID
+  }
   return {
     name: 'jimeng-server',
     configureServer(server: ViteDevServer) {

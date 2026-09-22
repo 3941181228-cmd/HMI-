@@ -12,8 +12,8 @@
     --surface-tertiary: 228 16% 13%;
 
     /* Text hierarchy */
-    --foreground: 225 18% 92%;
-    --muted-foreground: 225 10% 52%;
+    --foreground: 225 18% 94%;
+    --muted-foreground: 225 10% 63%;
 
     /* Primary - soft violet blue */
     --primary: 255 55% 65%;
@@ -41,7 +41,7 @@
 
     /* Muted */
     --muted: 228 16% 10%;
-    --muted-foreground: 225 10% 52%;
+    --muted-foreground: 225 10% 63%;
 
     /* Destructive */
     --destructive: 0 72% 51%;
@@ -218,7 +218,7 @@
 
   /* Sidebar item styles */
   .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer;
     color: hsl(var(--muted-foreground));
   }
 
@@ -229,7 +229,8 @@
 
   .sidebar-item.active {
     background: hsl(var(--primary) / 0.1);
-    color: hsl(var(--primary));
+    color: hsl(var(--foreground));
+    font-weight: 600;
   }
 
   /* Status dot animation */
