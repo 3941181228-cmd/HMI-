@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     base: mode === 'sites' ? '/' : './',
-    publicDir: mode === 'sites' ? false : 'public',
+    publicDir: 'public',
     plugins: [react(), jimengServerPlugin(env), removeModuleTypePlugin()],
     resolve: {
       alias: {

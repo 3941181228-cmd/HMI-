@@ -6,8 +6,8 @@ import { Sparkles, Brain, Zap, Copy } from 'lucide-react'
 const features = [
   {
     icon: Sparkles,
-    title: 'AI 生成 HMI',
-    description: '自动生成高质量新能源智能座舱 HMI 页面，覆盖仪表盘、充电、导航、ADAS 等场景',
+    title: 'AI生成HMI',
+    description: '直接生成可编辑的 Figma 原生 HMI 页面，覆盖仪表盘、充电、导航、ADAS 等场景',
   },
   {
     icon: Brain,
@@ -16,13 +16,13 @@ const features = [
   },
   {
     icon: Zap,
-    title: '即梦 AI 引擎',
-    description: '基于即梦生成引擎，输出专业级 HMI 界面设计，保证画面质量与一致性',
+    title: '原生图层引擎',
+    description: '输出 Frame、文字、组件与颜色样式，不再经过 PNG 转 SVG 的中间流程',
   },
   {
     icon: Copy,
-    title: '多方案生成',
-    description: '一次生成多个设计方向，快速对比不同风格方案，加速设计决策',
+    title: 'Figma MCP 直写',
+    description: '填写 Figma 文件链接，由 Codex 通过官方 MCP 写入可编辑原生图层，无需自制插件',
   },
 ]
 

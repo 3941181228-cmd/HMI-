@@ -101,8 +101,8 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
       name: customName.trim(),
       description: '自定义主题',
       preview: {
-        gradient: `from-[${customPrimary}] to-[${customSecondary}]`,
-        bg: `bg-[${customPrimary}]/10`,
+        gradient: 'from-primary/60 to-primary/30',
+        bg: 'bg-primary/10',
         primaryHex: customPrimary,
       },
       colors: {
@@ -1631,7 +1631,7 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
     <AnimatePresence>
       {open && (
         <motion.div 
-          className="fixed inset-0 z-50 flex"
+          className="studio-settings-overlay fixed inset-0 z-50 flex"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -1646,7 +1646,11 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
           />
           
           <motion.div 
-            className="relative flex-1 flex m-4 rounded-2xl overflow-hidden shadow-2xl"
+            className="studio-settings-dialog relative flex-1 flex m-4 rounded-2xl overflow-hidden shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="系统设置"
+            onKeyDown={event => { if (event.key === 'Escape') onClose() }}
             style={{ 
               background: 'hsl(var(--surface) / 0.85)',
               backdropFilter: 'blur(24px)'
@@ -1668,8 +1672,8 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
               />
             </div>
 
-            <div className="relative flex h-full">
-              <div className="w-56 p-5 flex flex-col bg-[hsl(var(--surface-secondary)/0.3)] backdrop-blur-sm">
+            <div className="studio-settings-layout relative flex h-full w-full min-w-0">
+              <div className="studio-settings-navigation w-56 p-5 flex flex-col bg-[hsl(var(--surface-secondary)/0.3)] backdrop-blur-sm">
                 <div className="flex items-center gap-3 mb-8">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
                     <Settings size={18} className="text-white" />
@@ -1712,14 +1716,14 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
                 </nav>
 
                 <div className="pt-4">
-                  <Button variant="default" className="w-full gap-2">
+                  <Button variant="default" onClick={onClose} className="w-full gap-2">
                     <CheckCircle2 size={14} />
-                    保存更改
+                    完成
                   </Button>
                 </div>
               </div>
 
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between px-6 py-5 border-b border-primary/20">
                   <div>
                     <h3 className="text-lg font-bold text-foreground">
@@ -1731,13 +1735,14 @@ export default function SettingsCenter({ open, onClose, activeTab: initialTab, a
                   </div>
                   <button
                     onClick={onClose}
+                    aria-label="关闭设置"
                     className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-[hsl(var(--foreground)/0.06)] text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <X size={18} />
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6">
+                <div className="studio-settings-content flex-1 overflow-y-auto p-6">
                   <AnimatePresence mode="wait">
                     <motion.div
                       key={activeTab}

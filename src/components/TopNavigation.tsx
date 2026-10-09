@@ -11,15 +11,20 @@ import {
   RefreshCw,
   LogOut,
   ArrowLeftRight,
+  Menu,
+  X,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface TopNavigationProps {
+  navigationOpen?: boolean
+  onToggleNavigation?: () => void
+  onOpenSettings?: () => void
   autoSave?: boolean
   onOpenWorkspaceSettings?: () => void
 }
 
-export default function TopNavigation({ autoSave: autoSaveProp = true, onOpenWorkspaceSettings }: TopNavigationProps) {
+export default function TopNavigation({ autoSave: autoSaveProp = true, onOpenWorkspaceSettings, navigationOpen, onToggleNavigation, onOpenSettings }: TopNavigationProps) {
   const navigate = useNavigate()
   const { isLoggedIn, userName, userEmail, logout } = useAuth()
   const [autoSave, setAutoSave] = useState(autoSaveProp)
@@ -49,9 +54,12 @@ export default function TopNavigation({ autoSave: autoSaveProp = true, onOpenWor
   }, [userMenuOpen])
 
   return (
-    <header className="h-16 glass-strong border-b border-[hsl(var(--foreground)/0.06)] flex items-center justify-between px-5 shrink-0 z-50">
+    <header className="studio-topbar h-16 border-b border-[hsl(var(--foreground)/0.08)] flex items-center justify-between px-5 shrink-0 z-50">
       {/* Left - Logo */}
       <div className="flex items-center gap-3">
+        <button className="studio-menu-button" onClick={onToggleNavigation} aria-label={navigationOpen ? '收起导航' : '展开导航'} aria-expanded={navigationOpen} aria-controls="studio-navigation">
+          {navigationOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
         <div className="relative">
           <Hexagon size={28} className="text-primary" strokeWidth={1.5} />
           <div className="absolute inset-0 flex items-center justify-center">
@@ -62,7 +70,7 @@ export default function TopNavigation({ autoSave: autoSaveProp = true, onOpenWor
           <span className="text-sm font-semibold tracking-wide text-foreground">
             HMI Agent Studio
           </span>
-          <span className="text-[10px] text-muted-foreground tracking-widest uppercase">
+          <span className="text-xs text-muted-foreground">
             智能座舱设计平台
           </span>
         </div>
@@ -78,20 +86,13 @@ export default function TopNavigation({ autoSave: autoSaveProp = true, onOpenWor
             size={6}
             className={autoSave ? 'fill-emerald-400 text-emerald-400' : 'fill-muted-foreground text-muted-foreground'}
           />
-          <span>{autoSave ? '已自动保存' : '未保存'}</span>
+          <span className="studio-save-label">{autoSave ? '自动保存已开启' : '自动保存已关闭'}</span>
         </button>
 
         <div className="w-px h-5 bg-[hsl(var(--foreground)/0.06)] mx-2" />
 
-        <button className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-[hsl(var(--foreground)/0.04)] transition-colors duration-200 text-muted-foreground hover:text-foreground relative">
-          <Moon size={16} />
-        </button>
-        <button className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-[hsl(var(--foreground)/0.04)] transition-colors duration-200 text-muted-foreground hover:text-foreground relative">
-          <Bell size={16} />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary animate-glow-pulse" />
-        </button>
-        <button className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-[hsl(var(--foreground)/0.04)] transition-colors duration-200 text-muted-foreground hover:text-foreground">
-          <Settings size={16} />
+        <button onClick={onOpenSettings} aria-label="打开主题与系统设置" className="h-9 px-3 gap-2 flex items-center justify-center rounded-lg hover:bg-[hsl(var(--foreground)/0.04)] transition-colors duration-200 text-muted-foreground hover:text-foreground">
+          <Settings size={16} /><span className="hidden sm:inline text-sm">设置</span>
         </button>
 
         <div className="w-px h-5 bg-[hsl(var(--foreground)/0.06)] mx-2" />
@@ -99,6 +100,8 @@ export default function TopNavigation({ autoSave: autoSaveProp = true, onOpenWor
         <div className="relative">
           <button
             ref={userTriggerRef}
+            aria-label="账户菜单"
+            aria-expanded={userMenuOpen}
             onClick={() => setUserMenuOpen(!userMenuOpen)}
             className={`ml-2 h-8 w-8 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300 ${
               isLoggedIn

@@ -11,6 +11,9 @@ export interface FrameImage {
   id: string
   name: string
   url: string
+  bounds?: { x: number; y: number; width: number; height: number }
+  version?: string
+  absoluteBounds?: boolean
 }
 
 export interface SavedFigmaState {

@@ -122,23 +122,23 @@ export const HMI_STYLE_PRESETS: Record<string, HMIStylePreset> = {
     keywords: ['minimalist', 'large whitespace', 'clean hierarchy', 'futuristic', 'premium'],
     description: '大量留白，层级清晰，未来感',
   },
-  'HarmonyOS风格': {
-    name: 'HarmonyOS风格',
-    keywords: ['harmonyos automotive inspired', 'glassmorphism', 'layered cards', 'smart cockpit', 'soft glow'],
+  '玻璃光域风': {
+    name: '玻璃光域风',
+    keywords: ['glassmorphism', 'layered translucent cards', 'soft glow', 'depth hierarchy', 'smart cockpit'],
     description: '玻璃拟态，层叠卡片，柔和光晕',
   },
-  'Tesla风格': {
-    name: 'Tesla风格',
-    keywords: ['tesla inspired', 'ultra minimal', 'clean cards', 'map centered', 'clear information hierarchy'],
+  '地图沉浸风': {
+    name: '地图沉浸风',
+    keywords: ['map centered', 'ultra minimal', 'clean cards', 'immersive navigation', 'clear information hierarchy'],
     description: '极简克制，地图主导，信息层级清晰',
   },
-  'MBUX豪华风': {
-    name: 'MBUX豪华风',
+  '豪华光影风': {
+    name: '豪华光影风',
     keywords: ['luxury cockpit', 'ambient light', 'deep black', 'premium metal feel', 'immersive display'],
     description: '豪华座舱，氛围灯，深黑金属质感',
   },
-  'BMW科技风': {
-    name: 'BMW科技风',
+  '精密几何风': {
+    name: '精密几何风',
     keywords: ['technical precision', 'geometric layout', 'information density', 'performance feeling'],
     description: '几何分区，精密感，性能取向',
   },
@@ -159,6 +159,31 @@ export const HMI_COMPONENT_LIBRARY: Record<string, string[]> = {
   '媒体类': ['专辑封面', '播放器', '波形动效', '音量控制', '语音入口'],
   '助手类': ['AI助手头像', '对话卡片', '推荐事项', '快捷建议'],
   '系统类': ['顶部状态栏', '底部Dock', '时间天气', '账户入口', '设置入口'],
+}
+
+export interface BuildCodexHMIPromptOptions {
+  request: string
+  scenario: string
+  style: string
+}
+
+export function buildCodexHMIPrompt(options: BuildCodexHMIPromptOptions): string {
+  const scenarioDef = HMI_SCENARIOS.find(item => item.id === options.scenario) ?? HMI_SCENARIOS[0]
+  const styleDef = HMI_STYLE_PRESETS[options.style] ?? HMI_STYLE_PRESETS['通用科技风']
+
+  return [
+    `用户需求：${options.request.trim()}`,
+    `模块分类：${scenarioDef.name}（${scenarioDef.description}）`,
+    `核心信息：${scenarioDef.defaultComponents.join('、')}`,
+    `设计风格：${styleDef.name}（${styleDef.description}）`,
+    `视觉关键词：${styleDef.keywords.join(', ')}`,
+    '设计要求：使用真实汽车 HMI 信息架构，保证驾驶场景下的快速扫读、高对比度、大触控区域和清晰状态反馈；避免手机 App 式布局。',
+  ].join('\n')
+}
+
+export function extractCodexHMIUserRequest(prompt: string): string {
+  const match = prompt.match(/^用户需求：([\s\S]*?)\n模块分类：/)
+  return (match?.[1] || prompt).trim()
 }
 
 // ============================================================

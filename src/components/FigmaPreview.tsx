@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ZoomIn, ZoomOut, Maximize2, Move, Crosshair, Download, Image as ImageIcon, Layers } from 'lucide-react';
 import JSZip from 'jszip';
@@ -6,11 +6,9 @@ import { Issue } from './IssueList';
 import { fetchFigmaImageAsBlob } from '../services/figmaImageProxy';
 import { FigmaImage } from './FigmaImage';
 
-interface FrameImage {
-  id: string;
-  name: string;
-  url: string;
-}
+import type { FrameImage } from '../services/figmaStorage';
+import type { DesignDataSnapshot } from '../services/figmaAnalyzer';
+import { auditImageUrl, getIssueOverlay } from '../services/auditEvidence';
 
 interface ExportAsset {
   id: string;
@@ -23,12 +21,16 @@ interface FigmaPreviewProps {
   selectedIssue?: Issue;
   onIssueHighlight?: (issue: Issue) => void;
   images?: FrameImage[];
+  snapshot?: DesignDataSnapshot;
   exportAssets?: ExportAsset[];
 }
 
 type ViewMode = 'frames' | 'assets';
 
-export default function FigmaPreview({ selectedIssue, onIssueHighlight, images = [], exportAssets = [] }: FigmaPreviewProps) {
+export default function FigmaPreview({ selectedIssue, onIssueHighlight, images = [], exportAssets = [], snapshot }: FigmaPreviewProps) {
+  const frameRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -46,14 +48,13 @@ export default function FigmaPreview({ selectedIssue, onIssueHighlight, images =
   }, [exportAssets.length, images.length]);
 
   useEffect(() => {
-    if (selectedIssue?.position) {
-      // Center on the selected issue
-      const centerX = (window.innerWidth / 2) - (selectedIssue.position.x + selectedIssue.position.width / 2);
-      const centerY = (window.innerHeight / 2) - (selectedIssue.position.y + selectedIssue.position.height / 2);
-      setPosition({ x: centerX, y: centerY });
-      setZoom(1.5);
-    }
-  }, [selectedIssue]);
+    if (!selectedIssue) return;
+    setViewMode('frames');
+    setPosition({ x: 0, y: 0 });
+    setZoom(1);
+    const frame = images.find(f => getIssueOverlay(selectedIssue, f, snapshot));
+    if (frame) requestAnimationFrame(() => frameRefs.current[frame.id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  }, [selectedIssue, images, snapshot]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0) {
@@ -155,19 +156,19 @@ export default function FigmaPreview({ selectedIssue, onIssueHighlight, images =
       {/* 顶部工具栏 */}
       <div className="absolute top-4 left-4 flex gap-2 z-10">
         <button
-          onClick={() => setZoom(prev => Math.min(3, prev + 0.25))}
+          aria-label="放大" onClick={() => setZoom(prev => Math.min(3, prev + 0.25))}
           className="p-2 bg-[hsl(var(--surface))]/90 hover:bg-[hsl(var(--surface))] rounded-lg text-foreground transition-colors"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
         <button
-          onClick={() => setZoom(prev => Math.max(0.5, prev - 0.25))}
+          aria-label="缩小" onClick={() => setZoom(prev => Math.max(0.5, prev - 0.25))}
           className="p-2 bg-[hsl(var(--surface))]/90 hover:bg-[hsl(var(--surface))] rounded-lg text-foreground transition-colors"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
         <button
-          onClick={() => { setZoom(1); setPosition({ x: 0, y: 0 }); }}
+          aria-label="重置视图" onClick={() => { setZoom(1); setPosition({ x: 0, y: 0 }); }}
           className="p-2 bg-[hsl(var(--surface))]/90 hover:bg-[hsl(var(--surface))] rounded-lg text-foreground transition-colors"
         >
           <Maximize2 className="w-4 h-4" />
@@ -234,7 +235,7 @@ export default function FigmaPreview({ selectedIssue, onIssueHighlight, images =
       {viewMode === 'frames' ? (
         /* 画板预览视图 - 支持缩放拖动 */
         <div 
-          className="w-full h-full overflow-hidden"
+          className="w-full h-full min-h-[480px] overflow-auto"
           style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -245,177 +246,52 @@ export default function FigmaPreview({ selectedIssue, onIssueHighlight, images =
           <motion.div
             style={{
               transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
-              transformOrigin: 'center center',
+              transformOrigin: 'top left',
             }}
             className="relative"
           >
-            {/* Preview Content */}
+            {selectedIssue && <div className="m-4 mt-16 p-3 rounded-lg bg-[hsl(var(--surface))] text-sm" role="status">
+              <p className="font-medium">{selectedIssue.title}</p>
+              {selectedIssue.figmaUrl && <a href={selectedIssue.figmaUrl} target="_blank" rel="noreferrer"
+                className="text-cyan-500 underline">在 Figma 打开{selectedIssue.nodeId ? '节点 ' + selectedIssue.nodeId : '复核画板'}</a>}
+              <p className="mt-1 text-muted-foreground">
+                {images.some(f => getIssueOverlay(selectedIssue, f, snapshot))
+                  ? '红框：实测规则偏差；黄框：待确认或未检测。框选来自真实节点边界，缩放同步。'
+                  : selectedIssue.source === 'ai'
+                    ? 'AI 仅描述截图位置，未验证具体节点，不绘制猜测框。'
+                    : '该节点没有可显示的匹配截图或可见边界；请用问题卡片中的 Figma 链接定位。'}
+              </p>
+            </div>}
             {images.length > 0 ? (
-              <div className="flex flex-col gap-4 p-4 bg-[hsl(var(--surface-secondary))] rounded-2xl min-w-[400px] max-w-[800px]">
-                {images.map((frame, idx) => (
-                  <div key={frame.id || idx} className="relative bg-[hsl(var(--surface))] rounded-xl shadow-lg overflow-hidden border border-[hsl(var(--border))]">
-                    <FigmaImage
-                      url={frame.url}
-                      alt={frame.name}
-                      preview={true}
-                      className="w-full h-auto object-contain"
-                      loading="eager"
-                      onError={() => {
-                        // 所有代理都失败
-                      }}
-                    />
-                    <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-sm rounded text-[11px] text-white font-medium max-w-[80%] truncate">
-                      {frame.name}
+              <div className="flex flex-col gap-6 p-4 pt-16 max-w-[1000px]">
+                {images.map(frame => {
+                  const overlay = getIssueOverlay(selectedIssue, frame, snapshot);
+                  return <div key={frame.id} ref={element => { frameRefs.current[frame.id] = element; }}>
+                    <p className="mb-2 text-sm text-muted-foreground">{frame.name} · {frame.id}</p>
+                    <div className="relative border border-[hsl(var(--border))]">
+                      {failedImages[frame.url]
+                        ? <p className="p-8 text-sm text-muted-foreground">真实截图加载失败，未显示替代画面。请重新读取文件。</p>
+                        : <img src={auditImageUrl(frame.url)} alt={frame.name} draggable={false}
+                            className="block w-full h-auto" loading="eager"
+                            onLoad={event => {
+                              const img = event.currentTarget;
+                              const b = frame.bounds;
+                              const matches = !!b && Math.abs(img.naturalWidth / img.naturalHeight - b.width / b.height) < 0.01;
+                              setLoadedImages(prev => ({ ...prev, [frame.url]: matches }));
+                            }}
+                            onError={() => setFailedImages(prev => ({ ...prev, [frame.url]: true }))} />}
+                      {overlay && loadedImages[frame.url] && !failedImages[frame.url] && (
+                        <div data-testid="issue-overlay" aria-label={'节点标注 ' + selectedIssue?.nodeId}
+                          className={'absolute pointer-events-none border-2 ' + (selectedIssue?.status === 'open' ? 'border-red-500 bg-red-500/10' : 'border-amber-400 bg-amber-400/10')}
+                          style={{ left: overlay.left + '%', top: overlay.top + '%', width: overlay.width + '%', height: overlay.height + '%' }}>
+                          <span className="absolute top-0 left-0 bg-black/80 text-white text-xs px-1.5 py-0.5 whitespace-nowrap">{selectedIssue?.nodeId}</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  </div>;
+                })}
               </div>
-            ) : (
-            <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-[800px] h-[600px]">
-              {/* HMI Dashboard Mock */}
-              <div className="w-full h-full flex flex-col gap-4">
-                {/* Header */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600" />
-                    <div>
-                      <p className="font-semibold text-gray-900">HMI Dashboard</p>
-                      <p className="text-xs text-gray-500">Charging Dashboard</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500" />
-                    <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                    <div className="w-3 h-3 rounded-full bg-green-500" />
-                  </div>
-                </div>
-
-                {/* Main Content */}
-                <div className="flex-1 grid grid-cols-2 gap-4">
-                  {/* Left Panel */}
-                  <div className="space-y-4">
-                    <div className="h-32 bg-gradient-to-br from-blue-100 to-purple-100 rounded-xl p-4">
-                      <p className="text-xs text-gray-500 mb-1">Battery Level</p>
-                      <div className="flex items-end gap-2">
-                        <span className="text-3xl font-bold text-gray-900">85%</span>
-                        <span className="text-xs text-green-600">Charging</span>
-                      </div>
-                    </div>
-                    <div className="h-24 bg-gray-100 rounded-xl p-4">
-                      <p className="text-xs text-gray-500 mb-1">Range</p>
-                      <span className="text-2xl font-bold text-gray-900">420 km</span>
-                    </div>
-                  </div>
-
-                  {/* Right Panel */}
-                  <div className="space-y-4">
-                    <div className="h-24 bg-gray-100 rounded-xl p-4">
-                      <p className="text-xs text-gray-500 mb-1">Charging Speed</p>
-                      <span className="text-2xl font-bold text-gray-900">120 kW</span>
-                    </div>
-                    <div className="h-32 bg-gradient-to-br from-green-100 to-emerald-100 rounded-xl p-4">
-                      <p className="text-xs text-gray-500 mb-1">ETA</p>
-                      <div className="flex items-end gap-2">
-                        <span className="text-3xl font-bold text-gray-900">25 min</span>
-                        <span className="text-xs text-gray-500">to full</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Controls */}
-                <div className="flex gap-3">
-                  <button className="flex-1 h-12 bg-gray-900 text-white rounded-xl font-medium">
-                    Start Charging
-                  </button>
-                  <button className="flex-1 h-12 bg-gray-100 text-gray-900 rounded-xl font-medium">
-                    Schedule
-                  </button>
-                  <button className="w-12 h-12 bg-gray-100 text-gray-900 rounded-xl">
-                    ⋮
-                  </button>
-                </div>
-              </div>
-
-              {/* Issue Highlight Overlay */}
-              <AnimatePresence>
-                {selectedIssue?.position && (
-                  <>
-                    {/* Blur Background */}
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-none"
-                      style={{
-                        clipPath: `polygon(
-                          0 0, 
-                          100% 0, 
-                          100% 100%, 
-                          0 100%, 
-                          0 0, 
-                          ${selectedIssue.position.x}px ${selectedIssue.position.y}px, 
-                          ${selectedIssue.position.x + selectedIssue.position.width}px ${selectedIssue.position.y}px, 
-                          ${selectedIssue.position.x + selectedIssue.position.width}px ${selectedIssue.position.y + selectedIssue.position.height}px, 
-                          ${selectedIssue.position.x}px ${selectedIssue.position.y + selectedIssue.position.height}px, 
-                          ${selectedIssue.position.x}px ${selectedIssue.position.y}px
-                        )`
-                      }}
-                    />
-                    
-                    {/* Highlight Box */}
-                    <motion.div
-                      initial={{ scale: 0.9, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.9, opacity: 0 }}
-                      className="absolute border-2 border-red-500 bg-red-500/10 rounded-lg"
-                      style={{
-                        left: selectedIssue.position.x,
-                        top: selectedIssue.position.y,
-                        width: selectedIssue.position.width,
-                        height: selectedIssue.position.height,
-                      }}
-                    >
-                      {/* Scan Animation */}
-                      <motion.div
-                        animate={{ y: ['0%', '100%'] }}
-                        transition={{ duration: 1.5, repeat: Infinity }}
-                        className="absolute inset-0 bg-gradient-to-b from-red-500/20 to-transparent"
-                      />
-                      
-                      {/* Corner Markers */}
-                      <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-red-500" />
-                      <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-red-500" />
-                      <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 border-red-500" />
-                      <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-red-500" />
-                    </motion.div>
-
-                    {/* Issue Info Popup */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 10 }}
-                      className="absolute bg-white rounded-xl shadow-xl p-4 max-w-xs z-20"
-                      style={{
-                        left: Math.min(selectedIssue.position.x + selectedIssue.position.width + 10, 600),
-                        top: selectedIssue.position.y,
-                      }}
-                    >
-                      <div className="flex items-center gap-2 mb-2">
-                        <Crosshair className="w-4 h-4 text-red-500" />
-                        <span className="font-medium text-gray-900">{selectedIssue.title}</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mb-2">{selectedIssue.description}</p>
-                      <div className="flex items-center gap-2 text-xs text-green-600">
-                        <span className="font-medium">建议:</span>
-                        {selectedIssue.suggestion}
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-            )}
+            ) : <p className="p-8 pt-20 text-sm text-muted-foreground">未获取到真实画板截图。节点检测仍可查看，不使用示意图替代。</p>}
           </motion.div>
         </div>
       ) : (

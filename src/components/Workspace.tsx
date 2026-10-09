@@ -39,6 +39,7 @@ const CreationDashboard = lazy(() => import('./CreationDashboard'))
 const CheckPage = lazy(() => import('./CheckPage'))
 const ThemeSwapPanel = lazy(() => import('./ThemeSwapPanel'))
 const Tripo3DPanel = lazy(() => import('./Tripo3DPanel'))
+const CodexFigmaGenerator = lazy(() => import('./CodexFigmaGenerator'))
 
 import { Button } from './ui/button'
 import CheckBadge, { checkItemsByCategory } from './CheckBadge'
@@ -2292,7 +2293,14 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
   }
 
   return (
-    <main className="flex-1 flex flex-col overflow-hidden relative">
+    <main id="studio-main" className="studio-main flex-1 min-w-0 flex flex-col overflow-hidden relative">
+      <div className="studio-contextbar">
+        <nav aria-label="当前位置" className="flex min-w-0 items-center gap-3 text-sm">
+          <span className="text-muted-foreground">工作区</span><span className="text-muted-foreground/40">/</span>
+          <span className="font-medium truncate">{{ dashboard: '创作记录', preview: 'HMI预览', generate: 'AI生成HMI', edit: 'HMI编辑', theme: '主题工作室', check: '设计自检', export: '导出中心', wallpaper: '壁纸引擎', 'ai-wallpaper': 'AI生成壁纸', '3d-model': '3D模型生成' }[activeTab]}</span>
+        </nav>
+        <button onClick={() => setSettingsOpen(true)} className="studio-config-link"><Settings2 size={14} />API 配置</button>
+      </div>
       {/* Background atmosphere */}
       <div
         className="absolute inset-0 z-0"
@@ -2302,7 +2310,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
       />
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 relative z-10">
+      <div className="workspace-content flex-1 overflow-y-auto relative z-10">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div
@@ -2343,7 +2351,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                   onClick={() => onTabChange?.('generate')}
                 >
                   <Sparkles size={12} />
-                  AI 生成座舱
+                  AI生成HMI
                 </Button>
                 <Button variant="glass" size="sm" className="gap-1.5" onClick={() => onTabChange?.('theme')}>
                   <Palette size={12} />
@@ -2371,8 +2379,14 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
           )}
 
           {activeTab === 'generate' && (
+            <Suspense fallback={<div className="flex h-64 items-center justify-center text-sm text-muted-foreground"><Loader2 size={16} className="mr-2 animate-spin" />加载 Codex Figma 生成器…</div>}>
+              <CodexFigmaGenerator />
+            </Suspense>
+          )}
+
+          {false && (
             <motion.div
-              key="generate"
+              key="generate-legacy"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
@@ -2451,7 +2465,7 @@ export default function Workspace({ activeTab = 'dashboard', activeSection = 'fu
                 {refImage ? (
                   <div className="relative rounded-lg overflow-hidden border border-[hsl(var(--primary)/0.15)] glow-primary-sm">
                     <img
-                      src={refImage}
+                      src={refImage || undefined}
                       alt="Reference"
                       className="w-full max-h-48 object-contain bg-[hsl(var(--surface-secondary)/0.5)]"
                     />

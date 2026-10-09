@@ -227,7 +227,7 @@ export default function WorkspaceSettingsModal({ open, onClose, settings, onSett
                       )}
                     </AnimatePresence>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/50 mt-2">AI 生成 HMI 时默认使用的模型</p>
+                  <p className="text-[10px] text-muted-foreground/50 mt-2">壁纸与其他 AI 图像功能默认使用的模型；HMI 原文件固定使用 Codex</p>
                 </motion.div>
 
                 {/* Default Quality */}

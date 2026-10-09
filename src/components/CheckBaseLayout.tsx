@@ -32,7 +32,7 @@ export default function CheckBaseLayout({ category, children, stats, relatedChec
       className="h-full flex flex-col"
     >
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-wrap gap-5 items-start justify-between mb-6">
         <div className="flex items-center gap-4">
           <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center`}>
             <Icon className="w-6 h-6 text-white" />
@@ -44,7 +44,7 @@ export default function CheckBaseLayout({ category, children, stats, relatedChec
         </div>
 
         {/* Stats */}
-        <div className="flex items-center gap-6 px-4 py-3 rounded-xl bg-[hsl(var(--surface))] border border-[hsl(var(--border)/0.4)]">
+        <div className="flex flex-wrap items-center gap-4 px-4 py-3 rounded-xl bg-[hsl(var(--surface))] border border-[hsl(var(--border)/0.4)]">
           <div className="text-center">
             <div className="text-2xl font-bold text-foreground">{stats.total}</div>
             <div className="text-xs text-muted-foreground">总检查项</div>
@@ -67,7 +67,7 @@ export default function CheckBaseLayout({ category, children, stats, relatedChec
 
       {/* Related Checks */}
       {relatedChecks && relatedChecks.length > 0 && (
-        <div className="flex items-center gap-2 mb-6 px-1">
+        <div className="flex flex-wrap items-center gap-2 mb-6 px-1">
           <span className="text-xs text-muted-foreground">相关检查：</span>
           {relatedChecks.map((check) => (
             <a

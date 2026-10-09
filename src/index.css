@@ -2,6 +2,92 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shared workspace layout. Theme colors still come from the user's preset. */
+.studio-shell { height: 100dvh; }
+.studio-body { min-height: 0; }
+.studio-topbar { background: hsl(var(--surface)); gap: 1rem; }
+.studio-topbar > div { min-width: 0; }
+.studio-menu-button { display: none; padding: .5rem; border-radius: .5rem; }
+.studio-sidebar-wrap { width: 244px; flex-shrink: 0; min-height: 0; }
+.studio-sidebar { width: 100%; border-right: 1px solid hsl(var(--foreground) / .08); background: hsl(var(--surface)); }
+.studio-sidebar button { min-height: 38px; }
+.studio-sidebar .sidebar-item { font-size: .875rem; padding-block: .6rem; }
+.studio-sidebar-footer { display: flex; flex-direction: column; gap: .25rem; padding: 1rem 1.25rem; border-top: 1px solid hsl(var(--foreground) / .07); }
+.studio-contextbar { min-height: 56px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem clamp(1rem, 3vw, 2.5rem); background: hsl(var(--background)); border-bottom: 1px solid hsl(var(--foreground) / .07); z-index: 20; }
+.studio-config-link { display: inline-flex; align-items: center; gap: .5rem; font-size: .875rem; color: hsl(var(--muted-foreground)); white-space: nowrap; border-radius: .5rem; padding: .4rem .6rem; }
+.studio-config-link:hover { color: hsl(var(--foreground)); background: hsl(var(--foreground) / .05); }
+.workspace-content { min-height: 0; padding: 2rem clamp(1rem, 3vw, 2.5rem) 3rem; scroll-padding-top: 1.5rem; }
+.workspace-content > :is(.max-w-3xl, .max-w-4xl, .max-w-5xl, .hmi-generator) { max-width: 1240px; margin-inline: auto; }
+.workspace-content .glass { background: hsl(var(--surface) / .92); border-color: hsl(var(--foreground) / .09); box-shadow: 0 4px 20px hsl(var(--background) / .2); backdrop-filter: none; }
+.workspace-content .glass-strong { background: hsl(var(--surface)); border-color: hsl(var(--foreground) / .1); }
+.workspace-content :is(input:not([type='checkbox']):not([type='radio']):not([type='color']), select, textarea) { min-width: 0; font-size: .875rem; line-height: 1.6; }
+.workspace-content :is(input[type='text'], input[type='url'], input[type='number'], select) { min-height: 40px; }
+.studio-shell :is(button, a, input, select, textarea, summary):focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 3px; }
+.studio-shell select option { background: hsl(var(--surface)); color: hsl(var(--foreground)); }
+.studio-shell :is([class~='text-[8px]'], [class~='text-[9px]'], [class~='text-[10px]'], [class~='text-[11px]']) { font-size: .75rem; line-height: 1.5; }
+.workspace-content h2 { letter-spacing: -.025em; line-height: 1.35; }
+.hmi-generator { width: 100%; }
+.generator-page-heading { padding-bottom: .5rem; }
+.generator-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1.5rem; align-items: start; }
+.generator-editor { display: flex; min-width: 0; flex-direction: column; gap: 1.5rem; }
+.generator-settings { min-width: 0; }
+.hmi-generator .glass { border-radius: 16px; padding: 1.5rem; }
+.hmi-generator .text-xs { font-size: .875rem; line-height: 1.65; }
+.hmi-generator textarea { min-height: 300px; padding: 1rem; line-height: 1.8; background: hsl(var(--background) / .5); }
+.hmi-generator button { min-height: 36px; }
+.hmi-generator button svg { flex-shrink: 0; }
+.hmi-generator .library-link-row > :is(input, button) { height: 40px; min-height: 40px; padding-block: 0; border-radius: .5rem; }
+.hmi-generator .library-link-row > button { padding-inline: 1rem; }
+.generator-settings .glass { padding: 1.25rem; }
+.generator-submitbar { position: sticky; bottom: 0; z-index: 25; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: 1rem 1.25rem; border: 1px solid hsl(var(--foreground) / .12); border-radius: 14px; background: hsl(var(--surface)); box-shadow: 0 -8px 32px hsl(var(--background) / .4); }
+.generator-submitbar > button { min-height: 44px; padding-inline: 2rem; }
+.studio-settings-overlay { align-items: center; justify-content: center; padding: 1.5rem; }
+.studio-settings-dialog { max-width: 1160px; height: min(840px, 90dvh); margin: 0; border: 1px solid hsl(var(--foreground) / .12); }
+.studio-settings-navigation { flex-shrink: 0; border-right: 1px solid hsl(var(--foreground) / .08); }
+.studio-settings-content > * { max-width: 840px; margin-inline: auto; }
+.studio-settings-content :is(input, select, button, label) { font-size: .875rem; }
+.studio-settings-content .glass-strong { box-shadow: none; border-color: hsl(var(--foreground) / .08); }
+@media (min-width: 1600px) {
+  .studio-sidebar-wrap { width: 264px; }
+  .generator-grid { grid-template-columns: minmax(0, 1fr) 360px; }
+}
+@media (max-width: 1150px) {
+  .studio-sidebar-wrap { width: 220px; }
+  .generator-grid { grid-template-columns: minmax(0, 1fr); }
+  .generator-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  .generator-settings > * { margin-top: 0 !important; }
+}
+@media (max-width: 900px) {
+  .studio-menu-button { display: inline-flex; }
+  .studio-body { flex-direction: column; }
+  .studio-sidebar-wrap { display: none; width: 100%; max-height: 42dvh; border-bottom: 1px solid hsl(var(--foreground) / .1); }
+  .studio-sidebar-wrap[data-open='true'] { display: block; }
+  .studio-sidebar { max-height: 42dvh; }
+  .studio-sidebar-footer { display: none; }
+  .workspace-content { padding: 1.25rem 1rem 2rem; }
+  .studio-settings-overlay { padding: .75rem; }
+  .studio-settings-dialog { height: 94dvh; }
+  .studio-settings-layout { flex-direction: column; }
+  .studio-settings-navigation { width: 100%; padding: .75rem; border-right: 0; border-bottom: 1px solid hsl(var(--foreground) / .08); }
+  .studio-settings-navigation > :not(nav) { display: none; }
+  .studio-settings-navigation nav { display: flex; gap: .25rem; }
+  .studio-settings-navigation nav > button { flex: 1; min-width: 0; margin: 0; padding: .6rem; gap: .5rem; }
+  .studio-settings-navigation nav > button > div:first-child { display: none; }
+  .studio-settings-navigation nav > button > div > div:last-child { display: none; }
+  .studio-settings-content { padding: 1rem; }
+}
+@media (max-width: 560px) {
+  .studio-topbar { padding-inline: .75rem; }
+  .studio-save-label { display: none; }
+  .studio-contextbar { gap: .5rem; padding-inline: 1rem; }
+  .generator-settings { grid-template-columns: minmax(0, 1fr); }
+  .hmi-generator .glass { padding: 1rem; }
+  .generator-page-heading h2 { font-size: 1.25rem; }
+  .generator-submitbar { position: static; }
+  .generator-submitbar > button { width: 100%; }
+  .hmi-generator textarea { min-height: 240px; }
+}
+
 @layer base {
   :root {
     /* === Dark EV Cockpit Theme === */

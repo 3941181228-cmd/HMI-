@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
-import { LayoutGrid, Type, Palette, Boxes, CheckCircle2, AlertTriangle, Info, Sparkles, ChevronRight, Zap, Target, BarChart3 } from 'lucide-react';
-import { CategoryAnalysis, DesignHighlight, ImprovementSuggestion, AnalysisMetric } from '../services/figmaAnalyzer';
+import { LayoutGrid, Type, Palette, Boxes, CheckCircle2, Sparkles, ChevronRight, Zap, Target, BarChart3, Database, ShieldCheck, Eye, Crosshair, Loader2 } from 'lucide-react';
+import { CategoryAnalysis, DesignHighlight, ImprovementSuggestion, AnalysisMetric, AnalysisResult } from '../services/figmaAnalyzer';
 
 interface AnalysisReportProps {
   categories: CategoryAnalysis[];
@@ -15,6 +15,7 @@ interface AnalysisReportProps {
   frameCount: number;
   textCount: number;
   totalNodes: number;
+  auditMeta: AnalysisResult['auditMeta'];
 }
 
 const categoryIcons: Record<string, typeof LayoutGrid> = {
@@ -22,6 +23,10 @@ const categoryIcons: Record<string, typeof LayoutGrid> = {
   typography: Type,
   color: Palette,
   spacing: Boxes,
+  effects: Sparkles,
+  designSystem: Boxes,
+  interaction: Target,
+  visualAI: Eye,
 };
 
 const getStatusColor = (status: AnalysisMetric['status']): string => {
@@ -68,13 +73,66 @@ export default function AnalysisReport({
   frameCount,
   textCount,
   totalNodes,
+  auditMeta,
 }: AnalysisReportProps) {
+  const aiStatus = {
+    disabled: { label: '真实数据模式 · AI 推测已关闭', className: 'text-muted-foreground', icon: Eye },
+    pending: { label: '等待视觉复核', className: 'text-muted-foreground', icon: Eye },
+    running: { label: 'AI 视觉复核中', className: 'text-violet-500', icon: Loader2 },
+    completed: { label: `AI 补充 ${auditMeta.aiReview.findingCount} 项`, className: 'text-emerald-500', icon: CheckCircle2 },
+    unavailable: { label: 'AI 补充未运行', className: 'text-amber-500', icon: Eye },
+  }[auditMeta.aiReview.status];
+  const AIStatusIcon = aiStatus.icon;
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
+      {/* Audit provenance */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="bg-[hsl(var(--surface))] rounded-xl border border-cyan-500/20 p-4"
+      >
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-cyan-500" />
+            <h4 className="text-sm font-semibold text-foreground">检测依据</h4>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-500">
+            <ShieldCheck className="w-3 h-3" />只读
+          </span>
+        </div>
+        <div className="space-y-2 text-sm break-words">
+          <p className="text-muted-foreground">文件版本：{auditMeta.fileVersion || 'API 未提供'}</p>
+          <p className="text-muted-foreground">读取时间：{auditMeta.fetchedAt ? new Date(auditMeta.fetchedAt).toLocaleString() : '未记录'}</p>
+          {auditMeta.lastModified && <p className="text-muted-foreground">文件修改时间：{new Date(auditMeta.lastModified).toLocaleString()}</p>}
+          <details className="text-xs text-muted-foreground"><summary>原始文件与规则凭据</summary>
+            <p className="break-all mt-2">文件：{auditMeta.fileKey}</p>
+            <p className="break-all">原始响应 SHA-256：{auditMeta.documentHash || '当前环境无法计算，未伪造哈希'}</p>
+            <pre className="whitespace-pre-wrap mt-2">{JSON.stringify(auditMeta.rulesSnapshot, null, 2)}</pre>
+          </details>
+          <p className="text-muted-foreground">隐藏节点 {auditMeta.hiddenNodeCount} 个，不参与可见文本与触控检测。</p>
+          <div className="flex items-start gap-2 text-muted-foreground">
+            <Crosshair className="w-3.5 h-3.5 mt-0.5 text-cyan-500" />
+            <span>{auditMeta.scope === 'node' ? `节点范围：${auditMeta.targetNodeName || auditMeta.targetNodeId}` : '范围：整份 Figma 文件'}</span>
+          </div>
+          <div className="flex items-start gap-2 text-muted-foreground">
+            <ShieldCheck className="w-3.5 h-3.5 mt-0.5 text-emerald-500" />
+            <span>规则集：{auditMeta.ruleSetName} · 真实节点属性优先</span>
+          </div>
+          <div className={`flex items-start gap-2 ${aiStatus.className}`} title={auditMeta.aiReview.message}>
+            <AIStatusIcon className={`w-3.5 h-3.5 mt-0.5 ${auditMeta.aiReview.status === 'running' ? 'animate-spin' : ''}`} />
+            <span>{aiStatus.label}</span>
+          </div>
+          {auditMeta.aiReview.message && (
+            <p className="pl-5 text-xs leading-relaxed break-all text-muted-foreground">{auditMeta.aiReview.message}</p>
+          )}
+          <p className="pt-2 border-t text-xs text-amber-500">这是所选项目规则的检查，不是完整合规或汽车安全认证。无数据不计为通过；AI 建议未经人工验证。</p>
+        </div>
+      </motion.div>
+
       {/* Document Overview */}
       <motion.div
         initial={{ opacity: 0 }}

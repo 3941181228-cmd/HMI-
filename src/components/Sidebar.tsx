@@ -36,7 +36,7 @@ const sections: SidebarSection[] = [
     id: 'ai-gen',
     icon: <Sparkles size={16} strokeWidth={2.25} />,
     title: 'AI 生成',
-    items: ['AI 生成 HMI', 'AI 生成壁纸', '3D 模型生成'],
+    items: ['AI生成HMI', 'AI 生成壁纸', '3D 模型生成'],
     navigateTo: 'generate',
   },
   {
@@ -82,6 +82,7 @@ const sections: SidebarSection[] = [
 ]
 
 interface SidebarProps {
+  activeTab?: string
   onNavigate?: (target: string) => void
   activeSection?: string
   historyRecords?: HistoryRecord[]
@@ -95,7 +96,7 @@ const editItemMap: Record<string, string> = {
 }
 
 const genItemMap: Record<string, string> = {
-  'AI 生成 HMI': 'generate',
+  'AI生成HMI': 'generate',
   'AI 生成壁纸': 'ai-wallpaper',
   '3D 模型生成': '3d-model',
 }
@@ -145,21 +146,26 @@ const checkItemMap: Record<string, string> = {
 }
 
 const checkCategoryToItems: Record<string, string[]> = {
-  'ai-gen': ['AI 生成 HMI', 'AI 生成壁纸'],
+  'ai-gen': ['AI生成HMI', 'AI 生成壁纸'],
   'hmi-edit': [],
   'theme': ['AI 智能换色', 'Figma 一键换色'],
   'wallpaper': [],
   'check': ['导入检测', '布局对齐', '字体规范', '色彩对比', '间距系统'],
 }
 
-export default function Sidebar({ onNavigate, activeSection, historyRecords = [], onClearHistory }: SidebarProps) {
+export default function Sidebar({ onNavigate, activeSection, activeTab, historyRecords = [], onClearHistory }: SidebarProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set()
+    new Set(['ai-gen'])
   )
   const [activeItem, setActiveItem] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
+    const generationItem = Object.entries(genItemMap).find(([, target]) => target === activeTab)?.[0]
+    if (generationItem) {
+      setActiveItem(generationItem)
+      setExpandedSections(prev => new Set([...prev, 'ai-gen']))
+    }
     if (activeSection && wallpaperSectionToItem[activeSection]) {
       setActiveItem(wallpaperSectionToItem[activeSection])
       setExpandedSections((prev) => new Set([...prev, 'wallpaper']))
@@ -170,7 +176,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
       if (checkItemName) setActiveItem(checkItemName)
       setExpandedSections((prev) => new Set([...prev, 'check']))
     }
-  }, [activeSection])
+  }, [activeSection, activeTab])
 
   const toggleSection = (id: string) => {
     setExpandedSections((prev) => {
@@ -238,13 +244,15 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
   )
 
   return (
-    <aside className="w-[280px] h-full glass-strong flex flex-col overflow-hidden shrink-0">
+    <aside aria-label="工作区导航" className="studio-sidebar h-full flex flex-col overflow-hidden shrink-0">
       {/* Search */}
-      <div className="p-4 pb-2">
+      <div className="p-4 pb-3">
+        <p className="text-xs font-semibold text-muted-foreground mb-3 tracking-wider">设计工作区</p>
         <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
+            aria-label="搜索设计工具"
             placeholder="搜索 AI 工具..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -255,6 +263,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
 
       {/* Sections */}
       <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5">
+        {filteredSections.length === 0 && <p className="p-3 text-sm text-muted-foreground">没有匹配的工具，请换个关键词。</p>}
         {filteredSections.map((section) => {
           const isExpanded = expandedSections.has(section.id)
           const isDirectNav = section.items.length === 0 && section.navigateTo
@@ -264,6 +273,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
             return (
               <div key={section.id} className="animate-fade-in">
                 <button
+                  aria-current={isActive ? 'page' : undefined}
                   onClick={() => handleSectionClick(section)}
                   className={cn(
                     'w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group',
@@ -291,6 +301,7 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
           return (
             <div key={section.id} className="animate-fade-in">
               <button
+                aria-expanded={isExpanded}
                 onClick={() => handleSectionClick(section)}
                 className={cn(
                   'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200 group',
@@ -428,6 +439,10 @@ export default function Sidebar({ onNavigate, activeSection, historyRecords = []
             </div>
           )
         })}
+      </div>
+      <div className="studio-sidebar-footer">
+        <span className="text-sm font-medium">HMI Agent Studio</span>
+        <span className="text-xs text-muted-foreground">创作 · 检查 · 导出</span>
       </div>
     </aside>
   )

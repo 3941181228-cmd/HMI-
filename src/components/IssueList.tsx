@@ -1,21 +1,12 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, AlertCircle, Info, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Info, ChevronRight, CheckCircle2, ExternalLink, Bot, ShieldCheck, MapPin } from 'lucide-react';
 
-export interface Issue {
-  id: string;
-  type: 'error' | 'warning' | 'info';
-  category: string;
-  title: string;
-  description: string;
-  suggestion: string;
-  position?: { x: number; y: number; width: number; height: number };
-  severity: 'high' | 'medium' | 'low';
-}
+export type Issue = import('../services/figmaAnalyzer').CheckIssue;
 
 interface IssueListProps {
   issues: Issue[];
-  onSelectIssue: (issue: Issue) => void;
+  onSelectIssue: (issue: Issue, nodeId?: string) => void;
   selectedIssueId?: string;
 }
 
@@ -56,6 +47,13 @@ export default function IssueList({ issues, onSelectIssue, selectedIssueId }: Is
     }
   };
 
+  const getStatusLabel = (issue: Issue) => {
+    if (issue.status === 'uncheckable') return '未能检测';
+    if (issue.status === 'review') return '待人工确认';
+    if (issue.status === 'accepted') return '已接受';
+    return '实测不符合所选规则';
+  };
+
   const stats = {
     all: issues.length,
     error: issues.filter(i => i.type === 'error').length,
@@ -73,7 +71,7 @@ export default function IssueList({ issues, onSelectIssue, selectedIssueId }: Is
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="font-semibold text-foreground">问题列表</h3>
-          <p className="text-sm text-muted-foreground">{issues.length} 个问题待处理</p>
+          <p className="text-sm text-muted-foreground">实测 {issues.filter(i => i.status === 'open').length} · 待确认 {issues.filter(i => i.status === 'review').length} · 未检测 {issues.filter(i => i.status === 'uncheckable').length}</p>
         </div>
       </div>
 
@@ -104,6 +102,9 @@ export default function IssueList({ issues, onSelectIssue, selectedIssueId }: Is
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelectIssue(issue); } }}
               onClick={() => onSelectIssue(issue)}
               className={`p-4 rounded-xl border cursor-pointer transition-all ${
                 selectedIssueId === issue.id
@@ -121,8 +122,48 @@ export default function IssueList({ issues, onSelectIssue, selectedIssueId }: Is
                     <span className={`w-2 h-2 rounded-full ${getSeverityColor(issue.severity)}`} />
                     <span className="text-xs text-muted-foreground">严重程度: {getSeverityLabel(issue.severity)}</span>
                   </div>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${issue.source === 'ai' ? 'bg-violet-500/10 text-violet-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                      {issue.source === 'ai' ? <Bot className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
+                      {issue.source === 'ai' ? 'AI 建议 · 未验证' : '节点规则检测'}
+                    </span>
+                    <span className="rounded bg-[hsl(var(--surface-secondary))] px-1.5 py-0.5 text-xs text-muted-foreground">{getStatusLabel(issue)}</span>
+                    {issue.confidence !== undefined && (
+                      <span className="text-xs text-muted-foreground">模型自评（非准确率） {Math.round(issue.confidence * 100)}%</span>
+                    )}
+                  </div>
                   <h4 className="font-medium text-foreground text-sm mb-1">{issue.title}</h4>
-                  <p className="text-xs text-muted-foreground mb-2">{issue.description}</p>
+                  <p className="text-sm text-muted-foreground mb-2">{issue.description}</p>
+                  {(issue.nodeName || issue.nodeId || issue.location) && (
+                    <div className="flex items-center gap-1.5 mb-2 text-xs text-cyan-500">
+                      <MapPin className="w-3 h-3 flex-shrink-0" />
+                      <span className="truncate">位置：{issue.location || issue.nodeName || issue.nodeId}</span>
+                      {issue.figmaUrl && (
+                        <a
+                          href={issue.figmaUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                          className="inline-flex items-center gap-0.5 hover:underline"
+                        >
+                          Figma <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {issue.nodePath && <p className="text-xs text-muted-foreground break-words mb-2">{issue.nodePath}</p>}
+                  {issue.ruleId && <p className="text-sm text-muted-foreground mb-2">规则 ID：{issue.ruleId}</p>}
+                  {issue.actualValue && <p className="text-sm mb-1">实测：{issue.actualValue}</p>}
+                  {issue.expectedValue && <p className="text-sm mb-2 text-muted-foreground">阈值：{issue.expectedValue}</p>}
+                  {!!issue.affectedNodeIds?.length && <details onClick={e => e.stopPropagation()} className="mb-2 text-xs">
+                    <summary className="cursor-pointer">定位节点（{issue.affectedNodeIds.length}）</summary>
+                    <div className="max-h-36 overflow-y-auto flex flex-wrap gap-2 mt-2">
+                      {issue.affectedNodeIds.map(id => <button type="button" key={id}
+                        className="rounded border px-2 py-1 text-cyan-500"
+                        onClick={e => { e.stopPropagation(); onSelectIssue(issue, id); }}>{id}</button>)}
+                    </div>
+                  </details>}
+                  {issue.evidence && <p className="mb-2 text-xs leading-relaxed text-muted-foreground/80">证据：{issue.evidence}</p>}
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-3 h-3 text-[hsl(var(--success))]" />
                     <span className="text-xs text-[hsl(var(--success))]">{issue.suggestion}</span>
@@ -141,76 +182,11 @@ export default function IssueList({ issues, onSelectIssue, selectedIssueId }: Is
             className="text-center py-8"
           >
             <CheckCircle2 className="w-12 h-12 mx-auto mb-4 text-[hsl(var(--success))]" />
-            <p className="text-foreground font-medium">没有发现问题</p>
-            <p className="text-sm text-muted-foreground">您的设计稿符合 HMI 设计规范</p>
+            <p className="text-foreground font-medium">{issues.length ? '当前筛选没有记录' : '本次规则未报告问题'}</p>
+            <p className="text-sm text-muted-foreground">不代表所有设计规范均已验证；请查看检测范围与未检测项</p>
           </motion.div>
         )}
       </div>
     </motion.div>
   );
 }
-
-// Mock issues data
-export const mockIssues: Issue[] = [
-  {
-    id: '1',
-    type: 'error',
-    category: '布局',
-    title: '自动布局未启用',
-    description: '检测到多个框架未使用自动布局，建议启用以保证响应式布局。',
-    suggestion: '启用自动布局',
-    position: { x: 100, y: 200, width: 200, height: 100 },
-    severity: 'high',
-  },
-  {
-    id: '2',
-    type: 'warning',
-    category: '字体',
-    title: '字号层级不规范',
-    description: '检测到文本字号未遵循设计系统规范，建议统一字号层级。',
-    suggestion: '统一字号为 12/14/16/18/24/32',
-    position: { x: 150, y: 350, width: 180, height: 30 },
-    severity: 'medium',
-  },
-  {
-    id: '3',
-    type: 'warning',
-    category: '用户体验',
-    title: '触控区域过小',
-    description: '按钮触控区域小于 44px 最小标准，影响驾驶时的操作安全性。',
-    suggestion: '增大触控区域至 44x44px',
-    position: { x: 200, y: 450, width: 32, height: 32 },
-    severity: 'high',
-  },
-  {
-    id: '4',
-    type: 'info',
-    category: '视觉系统',
-    title: '圆角不一致',
-    description: '检测到不同组件使用了不同的圆角值，建议统一设计规范。',
-    suggestion: '统一圆角为 12px',
-    position: { x: 250, y: 500, width: 150, height: 80 },
-    severity: 'low',
-  },
-  {
-    id: '5',
-    type: 'error',
-    category: '无障碍',
-    title: '对比度不足',
-    description: '文本与背景对比度低于 WCAG AA 标准，影响可读性。',
-    suggestion: '提高对比度至 4.5:1',
-    position: { x: 80, y: 150, width: 220, height: 24 },
-    severity: 'high',
-  },
-  {
-    id: '6',
-    type: 'info',
-    category: '一致性',
-    title: '阴影效果不一致',
-    description: '检测到多个相似组件使用了不同的阴影参数。',
-    suggestion: '统一阴影为 0 4px 12px rgba(0,0,0,0.1)',
-    position: { x: 300, y: 300, width: 180, height: 120 },
-    severity: 'low',
-  },
-];
-

@@ -1,6 +1,6 @@
 // Figma 设计分析器 - 基于真实 Figma API 数据进行一致性校验
-// 确保提取的数据与 Figma 原始数据完全一致，无偏差无遗漏
-import type { CheckRules } from './checkRules'
+// 只报告可从已读取快照验证的事实；语义判断与缺失数据必须单独标记。
+import { DEFAULT_RULES, type CheckRules } from './checkRules'
 
 // ===== Figma REST API 完整类型定义 =====
 
@@ -124,6 +124,11 @@ interface FigmaNode {
   opacity?: number
   visible?: boolean
   clipsContent?: boolean
+  overflowDirection?: 'NONE' | 'HORIZONTAL' | 'VERTICAL' | 'BOTH'
+  styles?: Record<string, string>
+  boundVariables?: Record<string, unknown>
+  isMask?: boolean
+  characterStyleOverrides?: number[]
   
   // 约束与变换
   constraints?: FigmaConstraints
@@ -143,8 +148,9 @@ interface FigmaNode {
   
   // 交互与动画
   reactions?: Array<{
-    action: { type: string; destinationId?: string; transition?: { type: string; easing?: string; duration?: number } }
-    trigger: { type: string }
+    action?: { type: string; destinationId?: string }
+    actions?: Array<{ type: string; destinationId?: string }>
+    trigger?: { type: string } | null
   }>
   
   // 网格与布局
@@ -259,6 +265,12 @@ export interface ExtractedNode {
   visible?: boolean
   blendMode?: string
   clipsContent?: boolean
+  overflowDirection?: FigmaNode['overflowDirection']
+  styleIds: Record<string, string>
+  boundVariableCount: number
+  isMask?: boolean
+  mixedTextStyle: boolean
+  nodePath: string
 
   // 约束
   constraints?: FigmaConstraints
@@ -308,6 +320,7 @@ export interface ExtractedNode {
 export interface DesignDataSnapshot {
   fileName: string
   fileKey: string
+  fileVersion?: string
   extractedAt: string
   totalNodes: number
   nodes: ExtractedNode[]
@@ -321,9 +334,7 @@ export interface DesignDataSnapshot {
   
   // 数据完整性报告
   integrityReport: {
-    totalProperties: number
-    extractedProperties: number
-    missingProperties: number
+    parsedNodes: number
     skippedNodes: Array<{ id: string; name: string; type: string; reason: string }>
     extractionErrors: Array<{ nodeId: string; nodeName: string; error: string }>
   }
@@ -344,13 +355,22 @@ export interface CheckIssue {
   nodeName?: string
   actualValue?: string
   expectedValue?: string
+  ruleId?: string
+  affectedNodeIds?: string[]
+  nodePath?: string
+  source?: 'rule' | 'ai'
+  status?: 'open' | 'review' | 'accepted' | 'uncheckable'
+  confidence?: number
+  evidence?: string
+  location?: string
+  figmaUrl?: string
 }
 
 export interface AnalysisMetric {
   label: string
   value: number | string
   unit?: string
-  status: 'good' | 'warning' | 'error'
+  status: 'good' | 'warning' | 'error' | 'unknown'
   actual?: string
   expected?: string
 }
@@ -400,6 +420,35 @@ export interface AnalysisResult {
   }
   dataSnapshot?: DesignDataSnapshot
   integrityReport?: DesignDataSnapshot['integrityReport']
+  auditMeta: {
+    source: 'figma-rest-api'
+    strategy: 'rule-first-ai-assisted' | 'verified-rules-only'
+    readOnly: true
+    scope: 'file' | 'node'
+    targetNodeId?: string
+    targetNodeName?: string
+    targetFound: boolean
+    ruleSetName: string
+    fileKey: string
+    fileVersion?: string
+    lastModified?: string
+    fetchedAt?: string
+    analyzedAt: string
+    documentHash?: string
+    rulesSnapshot: CheckRules
+    hiddenNodeCount: number
+    aiReview: {
+      status: 'pending' | 'running' | 'completed' | 'unavailable' | 'disabled'
+      findingCount: number
+      message?: string
+    }
+  }
+}
+
+export interface AnalyzeFigmaOptions {
+  targetNodeId?: string
+  fetchedAt?: string
+  documentHash?: string
 }
 
 // ===== 工具函数 =====
@@ -517,13 +566,19 @@ function extractStyle(style: FigmaStyle): ExtractedStyle {
   return result
 }
 
+function countAliases(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0
+  if ('type' in value && value.type === 'VARIABLE_ALIAS' && 'id' in value) return 1
+  return Object.values(value).reduce<number>((sum, item) => sum + countAliases(item), 0)
+}
+
 function extractNode(node: FigmaNode, parentId?: string): ExtractedNode {
   const extracted: ExtractedNode = {
     id: node.id,
     name: node.name,
     type: node.type,
     parentId,
-    bounds: node.absoluteBoundingBox || node.boundingBox || null,
+    bounds: node.absoluteBoundingBox || null,
     renderBounds: node.absoluteRenderBounds || null,
     fills: (node.fills || []).map(extractFill),
     strokes: (node.strokes || []).map(extractFill),
@@ -540,6 +595,12 @@ function extractNode(node: FigmaNode, parentId?: string): ExtractedNode {
     visible: node.visible,
     blendMode: node.blendMode,
     clipsContent: node.clipsContent,
+    overflowDirection: node.overflowDirection,
+    styleIds: { ...(node.styles || {}) },
+    boundVariableCount: countAliases(node.boundVariables) + countAliases(node.fills) + countAliases(node.strokes) + countAliases(node.effects),
+    isMask: node.isMask,
+    mixedTextStyle: !!node.characterStyleOverrides?.some(id => id !== 0),
+    nodePath: node.name,
     constraints: node.constraints,
     constrainProportions: node.constrainProportions,
     rotation: node.rotation,
@@ -604,1133 +665,362 @@ function extractNode(node: FigmaNode, parentId?: string): ExtractedNode {
   return extracted
 }
 
-export function extractAllDesignData(apiResponse: any, fileKey?: string): DesignDataSnapshot {
-  const document: FigmaNode = apiResponse?.document || apiResponse
-  const fileName = apiResponse?.name || document?.name || '未命名文件'
-  
-  const nodes: ExtractedNode[] = []
+export function normalizeNodeId(nodeId?: string): string | undefined {
+  if (!nodeId) return undefined
+  const id = decodeURIComponent(nodeId).replace(/-/g, ':')
+  if (!/^[A-Za-z0-9:;]+$/.test(id)) throw new Error('Figma 节点 ID 格式无效')
+  return id
+}
+
+export function extractAllDesignData(apiResponse: any, fileKey?: string, targetNodeId?: string): DesignDataSnapshot {
+  const document = apiResponse?.document
+  if (!document || document.type !== 'DOCUMENT' || !Array.isArray(document.children)) {
+    throw new Error('未读取到有效的 Figma 文件，不能生成检测结果')
+  }
+  const allNodes: ExtractedNode[] = []
   const nodeMap = new Map<string, ExtractedNode>()
   const parentMap = new Map<string, string>()
-  const skippedNodes: Array<{ id: string; name: string; type: string; reason: string }> = []
-  const extractionErrors: Array<{ nodeId: string; nodeName: string; error: string }> = []
-  
-  let totalProperties = 0
-  let extractedProperties = 0
-  
-  function traverse(node: FigmaNode, parentId?: string) {
-    try {
-      // 统计属性数量
-      totalProperties += Object.keys(node).length
-      
-      const extracted = extractNode(node, parentId)
-      nodes.push(extracted)
-      nodeMap.set(node.id, extracted)
-      
-      if (parentId) {
-        parentMap.set(node.id, parentId)
-      }
-      
-      extractedProperties += Object.keys(extracted).filter(k => extracted[k as keyof ExtractedNode] !== undefined && extracted[k as keyof ExtractedNode] !== null).length
-      
-      // 递归处理子节点
-      if (node.children && Array.isArray(node.children)) {
-        for (const child of node.children) {
-          traverse(child, node.id)
-        }
-      }
-    } catch (error) {
-      extractionErrors.push({
-        nodeId: node.id,
-        nodeName: node.name,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      skippedNodes.push({
-        id: node.id,
-        name: node.name,
-        type: node.type,
-        reason: `提取错误: ${error instanceof Error ? error.message : String(error)}`,
-      })
+  function traverse(node: FigmaNode, parent?: ExtractedNode) {
+    if (!node || typeof node.id !== 'string' || !node.id || typeof node.type !== 'string' || nodeMap.has(node.id)) {
+      throw new Error('Figma 节点数据缺失或 ID 重复，请重新读取文件')
     }
+    if (node.children !== undefined && !Array.isArray(node.children)) throw new Error('Figma 子节点数据异常')
+    const extracted = extractNode(node, parent?.id)
+    extracted.visible = parent?.visible !== false && node.visible !== false && (node.opacity ?? 1) > 0
+    extracted.nodePath = parent ? parent.nodePath + ' / ' + node.name : node.name
+    nodeMap.set(node.id, extracted)
+    if (parent) parentMap.set(node.id, parent.id)
+    allNodes.push(extracted)
+    for (const child of node.children || []) traverse(child, extracted)
   }
-  
-  if (document && document.children) {
-    for (const page of document.children) {
-      traverse(page)
+  traverse(document)
+  const targetId = normalizeNodeId(targetNodeId)
+  if (targetId && !nodeMap.has(targetId)) throw new Error('未找到链接指定的节点 ' + targetId + '，检测已停止；不会回退到其他范围')
+  const inScope = (node: ExtractedNode) => {
+    if (!targetId) return node.type !== 'DOCUMENT'
+    let current: ExtractedNode | undefined = node
+    while (current) {
+      if (current.id === targetId) return true
+      current = current.parentId ? nodeMap.get(current.parentId) : undefined
     }
+    return false
   }
-  
-  const pageCount = (document.children || []).length
-  const componentCount = nodes.filter(n => n.isComponent).length
-  const instanceCount = nodes.filter(n => n.isInstance).length
-  const frameCount = nodes.filter(n => n.type === 'FRAME').length
-  const textCount = nodes.filter(n => n.type === 'TEXT').length
-  
+  const nodes = allNodes.filter(inScope)
+  if (!nodes.some(n => n.type !== 'CANVAS' && n.type !== 'DOCUMENT')) throw new Error('所选范围没有可分析的设计节点')
+  const pages = new Set(nodes.map(n => {
+    let current: ExtractedNode | undefined = n
+    while (current && current.type !== 'CANVAS') current = current.parentId ? nodeMap.get(current.parentId) : undefined
+    return current?.id
+  }).filter(Boolean))
   return {
-    fileName,
-    fileKey: fileKey || '',
-    extractedAt: new Date().toISOString(),
-    totalNodes: nodes.length,
-    nodes,
-    nodeMap,
-    parentMap,
-    pageCount,
-    componentCount,
-    instanceCount,
-    frameCount,
-    textCount,
-    integrityReport: {
-      totalProperties,
-      extractedProperties,
-      missingProperties: totalProperties - extractedProperties,
-      skippedNodes,
-      extractionErrors,
-    },
+    fileName: apiResponse.name || '未命名文件', fileKey: fileKey || '', fileVersion: apiResponse.version, extractedAt: new Date().toISOString(),
+    totalNodes: nodes.length, nodes, nodeMap, parentMap, pageCount: pages.size,
+    componentCount: nodes.filter(n => n.isComponent).length,
+    instanceCount: nodes.filter(n => n.isInstance).length,
+    frameCount: nodes.filter(n => n.type === 'FRAME').length,
+    textCount: nodes.filter(n => n.type === 'TEXT').length,
+    integrityReport: { parsedNodes: nodes.length, skippedNodes: [], extractionErrors: [] },
   }
 }
 
-// ===== 真实背景色获取 =====
+type Bounds = NonNullable<ExtractedNode['bounds']>
+function validBounds(box: Bounds | null | undefined): box is Bounds {
+  return !!box && [box.x, box.y, box.width, box.height].every(Number.isFinite) && box.width > 0 && box.height > 0
+}
+function overlaps(a: Bounds, b: Bounds) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+function contains(a: Bounds, b: Bounds) {
+  return b.x >= a.x && b.y >= a.y && b.x + b.width <= a.x + a.width && b.y + b.height <= a.y + a.height
+}
+function singleOpaqueFill(node: ExtractedNode) {
+  const fills = node.fills.filter(f => f.visible && f.opacity > 0)
+  if (fills.length !== 1) return null
+  const fill = fills[0]
+  return fill.type === 'SOLID' && fill.opacity === 1 && fill.color && (fill.color.a ?? 1) === 1 &&
+    (!fill.blendMode || fill.blendMode === 'NORMAL') &&
+    [fill.color.r, fill.color.g, fill.color.b].every(v => Number.isFinite(v) && v >= 0 && v <= 1) ? fill.color : null
+}
 
-function findRealParentBackground(
-  nodeId: string,
-  nodeMap: Map<string, ExtractedNode>,
-  parentMap: Map<string, string>,
-  textNodeId?: string
-): { r: number; g: number; b: number } | null {
-  // 获取文字颜色，用于判断背景是否与文字同色（需要跳过）
-  let textRgb: { r: number; g: number; b: number } | null = null
-  if (textNodeId) {
-    const textNode = nodeMap.get(textNodeId)
-    if (textNode) {
-      for (const fill of textNode.fills) {
-        if (fill.type === 'SOLID' && fill.visible !== false && fill.color && fill.opacity > 0.1) {
-          textRgb = { r: fill.color.r, g: fill.color.g, b: fill.color.b }
-          break
-        }
-      }
-    }
-  }
-
-  // 收集所有父节点链上有可见填充的容器
-  const candidates: Array<{ rgb: { r: number; g: number; b: number }; area: number; depth: number }> = []
-  let currentId = nodeId
-  let depth = 0
-  const maxDepth = 15
-
-  while (depth < maxDepth) {
-    const parentId = parentMap.get(currentId)
-    if (!parentId) break
-
-    const parent = nodeMap.get(parentId)
+// Conservative: no estimated backgrounds, alpha compositing, mixed runs or guessed z-order.
+function resolveContrast(node: ExtractedNode, snapshot: DesignDataSnapshot, children: Map<string, ExtractedNode[]>) {
+  if (node.mixedTextStyle || !validBounds(node.bounds) || !singleOpaqueFill(node)) return null
+  let current: ExtractedNode | undefined = node
+  let background: ExtractedNode | undefined
+  while (current) {
+    if ((current.opacity ?? 1) !== 1 || current.isMask || (current.rotation ?? 0) !== 0 ||
+        (current.blendMode && !['NORMAL', 'PASS_THROUGH'].includes(current.blendMode)) ||
+        current.effects.some(e => e.visible)) return null
+    const parent: ExtractedNode | undefined = current.parentId ? snapshot.nodeMap.get(current.parentId) : undefined
     if (!parent) break
-
-    // 查找父节点的可见 SOLID 填充
-    for (const fill of parent.fills) {
-      if (fill.type === 'SOLID' && fill.visible !== false && fill.color && fill.opacity > 0.1) {
-        const rgb = { r: fill.color.r, g: fill.color.g, b: fill.color.b }
-        const bounds = parent.bounds
-        const area = bounds ? bounds.width * bounds.height : 0
-        candidates.push({ rgb, area, depth })
-        break // 只取第一个可见的 SOLID 填充
+    if (parent.type !== 'CANVAS' && parent.type !== 'DOCUMENT') {
+      if (!validBounds(parent.bounds) || !contains(parent.bounds, node.bounds)) return null
+      // Sibling shapes or shadows can cover the text or supply a different background.
+      if ((children.get(parent.id) || []).some(s => s.id !== current!.id && s.visible !== false &&
+        (s.isMask || !validBounds(s.renderBounds || s.bounds) || overlaps((s.renderBounds || s.bounds)!, node.bounds!)))) return null
+      if (!background && parent.fills.some(f => f.visible && f.opacity > 0)) {
+        if (!['FRAME', 'COMPONENT', 'INSTANCE', 'RECTANGLE'].includes(parent.type) || !singleOpaqueFill(parent) ||
+            (parent.cornerRadius ?? 0) > 0 || parent.rectangleCornerRadii?.some(r => r > 0)) return null
+        background = parent
       }
     }
-
-    currentId = parentId
-    depth++
+    current = parent
   }
-
-  if (candidates.length === 0) {
-    // 没找到任何有填充的父节点，使用默认深色背景（HMI常见）
-    return { r: 0.06, g: 0.09, b: 0.18 }
-  }
-
-  // 过滤掉与文字颜色相同的背景候选（避免白字白背景的误判）
-  if (textRgb) {
-    const filtered = candidates.filter(c =>
-      !(Math.abs(c.rgb.r - textRgb.r) < 0.05 && Math.abs(c.rgb.g - textRgb.g) < 0.05 && Math.abs(c.rgb.b - textRgb.b) < 0.05)
-    )
-    if (filtered.length > 0) {
-      // 优先选择面积最大的（通常是真正的背景容器）
-      filtered.sort((a, b) => b.area - a.area)
-      return filtered[0].rgb
-    }
-    // 所有候选都与文字同色，返回默认深色背景（HMI常见）
-    return { r: 0.06, g: 0.09, b: 0.18 }
-  }
-
-  // 没有文字颜色信息时，选择面积最大的（最外层容器更可能是真实背景）
-  candidates.sort((a, b) => b.area - a.area)
-  return candidates[0].rgb
+  if (!background) return null
+  return { foreground: singleOpaqueFill(node)!, background: singleOpaqueFill(background)!, backgroundNode: background }
 }
 
-// ===== 分析函数 =====
-
-function analyzeLayout(snapshot: DesignDataSnapshot, rules?: CheckRules): CategoryAnalysis {
-  const layoutRules = rules?.layout || {}
-  const autoLayoutMinRate = layoutRules.autoLayoutMinRate ?? 50
-  const maxLargeFrameWithoutConstraint = layoutRules.maxLargeFrameWithoutConstraint ?? 800
-  const requireAutoLayout = layoutRules.requireAutoLayout ?? false
-  const maxAbsoluteInAutoLayout = layoutRules.maxAbsoluteInAutoLayout ?? 0
-
-  const { nodes, nodeMap, parentMap } = snapshot
-  const issues: CheckIssue[] = []
-  const metrics: AnalysisMetric[] = []
-  const highlights: DesignHighlight[] = []
-  const suggestions: ImprovementSuggestion[] = []
-  
-  const containers = nodes.filter(n =>
-    (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE' || n.type === 'COMPONENT_SET')
-    && n.childCount > 0
-  )
-  const withAutoLayout = containers.filter(f => f.layoutMode && f.layoutMode !== 'NONE')
-  
-  const autoLayoutRate = containers.length > 0
-    ? Math.round((withAutoLayout.length / containers.length) * 100)
-    : 0
-  
-  metrics.push(
-    { label: '容器总数', value: containers.length, status: 'good' },
-    {
-      label: '自动布局使用率',
-      value: `${autoLayoutRate}%`,
-      status: autoLayoutRate === 100 ? 'good' : autoLayoutRate >= autoLayoutMinRate ? 'warning' : 'error',
-      actual: `${withAutoLayout.length}/${containers.length}`,
-      expected: `${containers.length}/${containers.length}`,
-    },
-    { label: '自动布局容器', value: withAutoLayout.length, status: 'good' },
-  )
-  
-  // 注意：primaryAxisAlignItems, counterAxisAlignItems, layoutAlign, layoutGrow,
-  // layoutSizingHorizontal, layoutSizingVertical 等参数在 Figma API 中是可选的，
-  // 不返回时代表使用默认值（如 MIN, INHERIT, 0, FIXED 等），
-  // 这是正常的 Figma 行为，不是"参数不完整"，不应报告为 issue。
-
-  // 绝对定位的子节点检测
-  const absoluteInAutoLayout: string[] = []
-  for (const node of nodes) {
-    if (node.layoutPositioning === 'ABSOLUTE' && node.parentId) {
-      const parent = nodeMap.get(node.parentId)
-      if (parent && parent.layoutMode && parent.layoutMode !== 'NONE') {
-        absoluteInAutoLayout.push(node.id)
-        if (absoluteInAutoLayout.length > maxAbsoluteInAutoLayout) {
-          issues.push({
-            id: nextIssueId(),
-            type: 'warning',
-            category: '布局',
-            title: `"${node.name}" 使用绝对定位`,
-            description: `在启用 Auto Layout 的父容器 "${parent.name}" 中使用绝对定位，可能导致布局不一致`,
-            suggestion: '考虑改为使用 Auto Layout 约束或移出容器',
-            severity: 'medium',
-            nodeId: node.id,
-            nodeName: node.name,
-          })
-        }
-      }
-    }
+export function analyzeFigmaDocument(apiResponse: any, fileKey?: string, rules?: CheckRules, options: AnalyzeFigmaOptions = {}): AnalysisResult {
+  if (typeof apiResponse?.version !== 'string' || !apiResponse.version.trim()) {
+    throw new Error('Figma 未返回文件版本，无法确认检测快照；未生成分析数据，请重新读取')
   }
-  
-  if (containers.length > 0 && withAutoLayout.length === 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: requireAutoLayout ? 'error' : 'error',
-      category: '布局',
-      title: '自动布局未启用',
-      description: `检测到 ${containers.length} 个包含子元素的容器未启用自动布局。`,
-      suggestion: '为所有包含子元素的框架启用 Auto Layout（Shift+A）',
-      severity: 'high',
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '布局',
-      title: '统一启用自动布局',
-      description: '当前所有包含子元素的容器均未启用 Auto Layout，会影响响应式布局和组件复用。',
-      priority: 'high',
-      affectedNodes: containers.length,
-      actionable: '选中所有包含子元素的框架，按 Shift+A 启用 Auto Layout',
-    })
-  } else if (containers.length > 0 && withAutoLayout.length < containers.length) {
-    const missing = containers.length - withAutoLayout.length
-    issues.push({
-      id: nextIssueId(),
-      type: requireAutoLayout ? 'error' : 'warning',
-      category: '布局',
-      title: requireAutoLayout ? '容器未启用自动布局' : '部分容器未启用自动布局',
-      description: `${missing} 个容器包含子元素但未启用自动布局。`,
-      suggestion: '为剩余容器启用 Auto Layout 以保证响应式布局',
-      severity: requireAutoLayout ? 'high' : 'medium',
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '布局',
-      title: '补全自动布局',
-      description: `${missing} 个容器仍使用绝对定位，建议启用 Auto Layout 提升设计灵活性。`,
-      priority: requireAutoLayout ? 'high' : 'medium',
-      affectedNodes: missing,
-      actionable: '筛选未启用 Auto Layout 的框架，批量启用自动布局功能',
-    })
-  } else if (withAutoLayout.length > 0) {
-    highlights.push({
-      id: `h-${nextIssueId()}`,
-      category: '布局',
-      title: '自动布局使用规范',
-      description: `${withAutoLayout.length} 个容器正确启用了自动布局，布局结构清晰可维护。`,
-    })
-  }
-  
-  // 大尺寸无布局约束的容器
-  const largeFrames = containers.filter(f => {
-    const box = f.bounds
-    return box && box.width > maxLargeFrameWithoutConstraint && (!f.layoutMode || f.layoutMode === 'NONE')
-  })
-  
-  metrics.push({
-    label: '大尺寸无约束容器',
-    value: largeFrames.length,
-    status: largeFrames.length === 0 ? 'good' : 'warning',
-  })
-  
-  if (largeFrames.length > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '布局',
-      title: '大尺寸容器缺少布局约束',
-      description: `${largeFrames.length} 个宽于 ${maxLargeFrameWithoutConstraint}px 的容器未设置自动布局或约束。`,
-      suggestion: '为大尺寸容器添加约束或启用自动布局',
-      severity: 'medium',
-    })
-  }
-  
-  // 最大嵌套深度
-  function calcDepth(nodeId: string, d = 0): number {
-    const node = nodeMap.get(nodeId)
-    if (!node) return d
-    if (node.childCount === 0) return d
-    
-    const children = nodes.filter(n => n.parentId === nodeId)
-    if (children.length === 0) return d
-    
-    return Math.max(...children.map(c => calcDepth(c.id, d + 1)))
-  }
-  
-  const pageIds = nodes.filter(n => n.type === 'CANVAS').map(n => n.id)
-  const maxDepth = pageIds.length > 0 ? Math.max(...pageIds.map(id => calcDepth(id))) : 0
-  
-  metrics.push({
-    label: '最大嵌套深度',
-    value: maxDepth,
-    status: maxDepth <= 5 ? 'good' : maxDepth <= 8 ? 'warning' : 'error',
-    expected: '<= 5 层',
-    actual: `${maxDepth} 层`,
-  })
-  
-  if (maxDepth > 8) {
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '布局',
-      title: '简化嵌套层级',
-      description: `当前最大布局深度为 ${maxDepth} 层，过深的嵌套会降低性能和可维护性。`,
-      priority: 'medium',
-      actionable: '合并不必要的嵌套框架，将最大深度控制在 5-6 层以内',
-    })
-  }
-  
-  return { id: 'layout', label: '布局结构', metrics, highlights, suggestions, issues }
-}
-
-function analyzeTypography(snapshot: DesignDataSnapshot, rules?: CheckRules): CategoryAnalysis {
-  const typographyRules = rules?.typography || {}
-  const maxFontFamilies = typographyRules.maxFontFamilies ?? 2
-  const maxFontSizes = typographyRules.maxFontSizes ?? 6
-  const maxFontWeights = typographyRules.maxFontWeights ?? 4
-  const minTextSize = typographyRules.minTextSize ?? 12
-  const maxLineHeightRatio = typographyRules.maxLineHeightRatio ?? 2
-
-  const { nodes } = snapshot
-  const issues: CheckIssue[] = []
-  const metrics: AnalysisMetric[] = []
-  const highlights: DesignHighlight[] = []
-  const suggestions: ImprovementSuggestion[] = []
-  
-  const textNodes = nodes.filter(n => n.type === 'TEXT')
-  
-  metrics.push({ label: '文本元素总数', value: textNodes.length, status: 'good' })
-  
-  if (textNodes.length === 0) {
-    return { id: 'typography', label: '排版系统', metrics, highlights, suggestions, issues }
-  }
-  
-  const fontSizes = textNodes.map(n => n.style?.fontSize || 0).filter(s => s > 0)
-  const fontFamilies = new Set(textNodes.map(n => n.style?.fontFamily).filter(Boolean))
-  const fontWeights = textNodes.map(n => n.style?.fontWeight || 0).filter(w => w > 0)
-  const uniqueFontWeights = new Set(fontWeights).size
-  const letterSpacings = textNodes.map(n => n.style?.letterSpacing || 0)
-  
-  const hmiRecommendedSizes = [12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 60, 72]
-  const nonStandardSizes = fontSizes.filter(s => !hmiRecommendedSizes.some(r => Math.abs(s - r) <= 1))
-  
-  const uniqueSizes = new Set(fontSizes.map(s => Math.round(s))).size
-  const minWeight = fontWeights.length > 0 ? Math.min(...fontWeights) : 400
-  const maxWeight = fontWeights.length > 0 ? Math.max(...fontWeights) : 400
-  
-  metrics.push(
-    {
-      label: '字体种类',
-      value: fontFamilies.size,
-      status: fontFamilies.size <= maxFontFamilies ? 'good' : fontFamilies.size <= maxFontFamilies + 1 ? 'warning' : 'error',
-      expected: `<= ${maxFontFamilies} 种`,
-      actual: `${fontFamilies.size} 种`,
-    },
-    {
-      label: '字号种类',
-      value: uniqueSizes,
-      status: uniqueSizes <= maxFontSizes ? 'good' : uniqueSizes <= maxFontSizes + 4 ? 'warning' : 'error',
-      expected: `<= ${maxFontSizes} 种`,
-      actual: `${uniqueSizes} 种`,
-    },
-    {
-      label: '字重种类',
-      value: uniqueFontWeights,
-      status: uniqueFontWeights <= maxFontWeights ? 'good' : 'warning',
-      expected: `<= ${maxFontWeights} 种`,
-      actual: `${uniqueFontWeights} 种`,
-    },
-    {
-      label: '字重范围',
-      value: fontWeights.length > 0 ? `${minWeight}-${maxWeight}` : 'N/A',
-      status: maxWeight - minWeight <= 300 ? 'good' : 'warning',
-      expected: '<= 300',
-      actual: `${maxWeight - minWeight}`,
-    },
-    {
-      label: '非标准字号',
-      value: nonStandardSizes.length,
-      status: nonStandardSizes.length === 0 ? 'good' : 'warning',
-      expected: '0',
-      actual: `${nonStandardSizes.length}`,
-    },
-  )
-  
-  if (nonStandardSizes.length > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '字体',
-      title: '字号层级不规范',
-      description: `检测到 ${nonStandardSizes.length} 个非标准字号（${nonStandardSizes.slice(0, 5).map(s => Math.round(s) + 'px').join(', ')}${nonStandardSizes.length > 5 ? '...' : ''}）。`,
-      suggestion: '统一字号层级为 8px 网格系统（12/14/16/18/20/24/32/48px）',
-      severity: 'medium',
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '字体',
-      title: '规范字号层级',
-      description: `当前使用了 ${uniqueSizes} 种不同字号，建议创建字号样式库统一管理。`,
-      priority: 'medium',
-      affectedNodes: nonStandardSizes.length,
-      actionable: '创建字号样式库（Text Styles），将非标准字号替换为推荐层级',
-    })
-  } else {
-    highlights.push({
-      id: `h-${nextIssueId()}`,
-      category: '字体',
-      title: '字号层级规范',
-      description: `${fontSizes.length} 个文本元素的字号符合规范。`,
-    })
-  }
-  
-  if (uniqueFontWeights > maxFontWeights) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '字体',
-      title: '字重种类过多',
-      description: `检测到 ${uniqueFontWeights} 种不同字重，建议控制在 ${maxFontWeights} 种以内。`,
-      suggestion: '统一字重使用，建议使用 Regular/Medium/Bold 等有限字重层级',
-      severity: 'medium',
-    })
-  }
-
-  if (fontFamilies.size > maxFontFamilies + 1) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '字体',
-      title: '字体种类过多',
-      description: `检测到 ${fontFamilies.size} 种不同字体，建议控制在 ${maxFontFamilies}-${maxFontFamilies + 1} 种以内。`,
-      suggestion: '统一字体使用，HMI 推荐使用思源黑体 / Inter / Roboto',
-      severity: 'medium',
-    })
-  } else if (fontFamilies.size > 0) {
-    highlights.push({
-      id: `h-${nextIssueId()}`,
-      category: '字体',
-      title: '字体种类合理',
-      description: `使用了 ${fontFamilies.size} 种字体，符合设计规范。`,
-    })
-  }
-  
-  // 小字号文本（驾驶场景可读性）
-  const smallText = textNodes.filter(n => {
-    const s = n.style?.fontSize || 16
-    const box = n.bounds
-    return s < minTextSize && box && box.width > 80
-  })
-  
-  metrics.push({
-    label: `小于${minTextSize}px长文本`,
-    value: smallText.length,
-    status: smallText.length === 0 ? 'good' : 'error',
-    expected: '0',
-    actual: `${smallText.length}`,
-  })
-  
-  if (smallText.length > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '字体',
-      title: '关键信息字号偏小',
-      description: `检测到 ${smallText.length} 个长文本区域字号小于 ${minTextSize}px，影响可读性。`,
-      suggestion: `增大关键信息字号，建议正文≥${minTextSize}px`,
-      severity: 'high',
-      nodeName: smallText[0]?.name,
-      position: smallText[0]?.bounds || undefined,
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '字体',
-      title: '增大关键信息字号',
-      description: `${smallText.length} 个文本元素字号小于 ${minTextSize}px，可读性不足。`,
-      priority: 'high',
-      affectedNodes: smallText.length,
-      actionable: `将所有小于 ${minTextSize}px 的长文本字号增大至 ${minTextSize}px 以上`,
-    })
-  }
-  
-  // 检查文本样式完整性
-  for (const text of textNodes) {
-    if (!text.style) {
-      issues.push({
-        id: nextIssueId(),
-        type: 'warning',
-        category: '字体',
-        title: `"${text.name}" 缺少文本样式`,
-        description: '文本节点未设置样式信息',
-        suggestion: '为文本节点设置字体、字号等样式',
-        severity: 'medium',
-        nodeId: text.id,
-        nodeName: text.name,
-      })
-    } else {
-      const missingProps: string[] = []
-      if (!text.style.fontFamily) missingProps.push('字体')
-      if (!text.style.fontSize) missingProps.push('字号')
-      if (!text.style.fontWeight) missingProps.push('字重')
-      
-      if (missingProps.length > 0) {
-        issues.push({
-          id: nextIssueId(),
-          type: 'info',
-          category: '字体',
-          title: `"${text.name}" 样式不完整`,
-          description: `缺少 ${missingProps.join(', ')} 属性`,
-          suggestion: '补充完整的文本样式',
-          severity: 'low',
-          nodeId: text.id,
-          nodeName: text.name,
-        })
-      }
-    }
-  }
-  
-  return { id: 'typography', label: '排版系统', metrics, highlights, suggestions, issues }
-}
-
-function analyzeColor(snapshot: DesignDataSnapshot, rules?: CheckRules): CategoryAnalysis {
-  const colorRules = rules?.color || {}
-  const minContrastNormal = colorRules.minContrastNormal ?? 4.5
-  const minContrastLarge = colorRules.minContrastLarge ?? 3.0
-  const maxColors = colorRules.maxColors ?? 20
-  const minTextOpacity = colorRules.minTextOpacity ?? 0.4
-  const warnLowOpacityText = colorRules.warnLowOpacityText ?? true
-
-  const { nodes, nodeMap, parentMap } = snapshot
-  const issues: CheckIssue[] = []
-  const metrics: AnalysisMetric[] = []
-  const highlights: DesignHighlight[] = []
-  const suggestions: ImprovementSuggestion[] = []
-  
-  const textNodes = nodes.filter(n => n.type === 'TEXT')
-  metrics.push({ label: '文本元素总数', value: textNodes.length, status: 'good' })
-  
-  if (textNodes.length === 0) {
-    return { id: 'color', label: '色彩方案', metrics, highlights, suggestions, issues }
-  }
-  
-  let contrastIssues = 0
-  let totalContrastRatio = 0
-  let validContrastCount = 0
-  let lowOpacityTextCount = 0
-  
-  for (const node of textNodes) {
-    let textColor: { r: number; g: number; b: number } | null = null
-    let textOpacity = 1
-    for (const fill of node.fills) {
-      if (fill.type === 'SOLID' && fill.visible && fill.color) {
-        textColor = { r: fill.color.r, g: fill.color.g, b: fill.color.b }
-        textOpacity = fill.opacity ?? 1
-        break
-      }
-    }
-
-    if (warnLowOpacityText && textColor && textOpacity < minTextOpacity && textOpacity > 0) {
-      lowOpacityTextCount++
-      if (lowOpacityTextCount <= 5) {
-        issues.push({
-          id: nextIssueId(),
-          type: 'warning',
-          category: '色彩',
-          title: `"${node.name || '文本'}" 透明度过低`,
-          description: `文字透明度为 ${Math.round(textOpacity * 100)}%，低于建议的 ${Math.round(minTextOpacity * 100)}%，可能影响可读性。`,
-          suggestion: '提高文字不透明度以保证可读性',
-          severity: 'medium',
-          nodeName: node.name,
-          position: node.bounds || undefined,
-          actualValue: `${Math.round(textOpacity * 100)}%`,
-          expectedValue: `>= ${Math.round(minTextOpacity * 100)}%`,
-        })
-      }
-    }
-
-    if (!textColor || textOpacity < 0.1) continue
-    
-    const bgColor = findRealParentBackground(node.id, nodeMap, parentMap, node.id) || { r: 0.06, g: 0.09, b: 0.18 }
-    
-    const ratio = getContrastRatio(textColor, bgColor)
-    totalContrastRatio += ratio
-    validContrastCount++
-    
-    if (ratio < minContrastNormal) {
-      contrastIssues++
-      if (contrastIssues <= 10) {
-        const textHex = rgbaToHex(textColor.r, textColor.g, textColor.b)
-        const bgHex = rgbaToHex(bgColor.r, bgColor.g, bgColor.b)
-        issues.push({
-          id: nextIssueId(),
-          type: ratio < minContrastLarge ? 'error' : 'warning',
-          category: '色彩',
-          title: `"${node.name || '文本'}" 对比度不足`,
-          description: `文字颜色 ${textHex} 与背景 ${bgHex} 对比度为 ${ratio.toFixed(1)}:1，低于 WCAG AA 标准 ${minContrastNormal}:1。`,
-          suggestion: '加深文字颜色或调整背景色以提高对比度',
-          severity: ratio < minContrastLarge ? 'high' : 'medium',
-          nodeName: node.name,
-          position: node.bounds || undefined,
-          actualValue: `${ratio.toFixed(1)}:1`,
-          expectedValue: `>= ${minContrastNormal}:1`,
-        })
-      }
-    }
-  }
-  
-  const avgContrast = validContrastCount > 0 ? (totalContrastRatio / validContrastCount).toFixed(2) : 'N/A'
-  
-  metrics.push(
-    {
-      label: '平均对比度',
-      value: avgContrast,
-      status: validContrastCount > 0 && parseFloat(avgContrast) >= minContrastNormal ? 'good' : parseFloat(avgContrast) >= minContrastLarge ? 'warning' : 'error',
-      expected: `>= ${minContrastNormal}:1`,
-      actual: `${avgContrast}:1`,
-    },
-    {
-      label: '对比度问题',
-      value: contrastIssues,
-      status: contrastIssues === 0 ? 'good' : contrastIssues <= 5 ? 'warning' : 'error',
-      expected: '0',
-      actual: `${contrastIssues}`,
-    },
-  )
-  
-  if (contrastIssues > 5) {
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '色彩',
-      title: '批量修复对比度问题',
-      description: `${contrastIssues} 处文本对比度低于 WCAG AA 标准（${minContrastNormal}:1），建议批量检查并修复。`,
-      priority: 'high',
-      affectedNodes: contrastIssues,
-      actionable: '使用 Figma 的对比度检查插件（如 Stark、Colorable）批量检测并修复低对比度文字',
-    })
-  } else if (contrastIssues > 0) {
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '色彩',
-      title: '提高文字对比度',
-      description: '部分文字颜色与背景对比度不足，影响可读性。',
-      priority: 'high',
-      affectedNodes: contrastIssues,
-      actionable: `将低对比度文字颜色加深，确保对比度达到 ${minContrastNormal}:1 以上`,
-    })
-  } else if (validContrastCount > 0) {
-    highlights.push({
-      id: `h-${nextIssueId()}`,
-      category: '色彩',
-      title: '色彩对比度良好',
-      description: `${validContrastCount} 个文本元素的对比度均符合 WCAG AA 标准。`,
-    })
-  }
-  
-  // 颜色种类统计（包括所有填充类型）
-  const allColors: string[] = []
-  for (const node of nodes) {
-    for (const fill of node.fills) {
-      if (fill.color && fill.visible) {
-        const hex = rgbaToHex(fill.color.r, fill.color.g, fill.color.b)
-        allColors.push(hex.substring(0, 7))
-      }
-    }
-  }
-  const uniqueColors = new Set(allColors).size
-  const goodColorThreshold = Math.floor(maxColors * 0.4)
-  const warnColorThreshold = Math.floor(maxColors * 0.75)
-  
-  metrics.push({
-    label: '主要颜色种类',
-    value: uniqueColors,
-    status: uniqueColors <= goodColorThreshold ? 'good' : uniqueColors <= warnColorThreshold ? 'warning' : 'error',
-    expected: `<= ${maxColors} 种`,
-    actual: `${uniqueColors} 种`,
-  })
-  
-  // 渐变使用统计
-  const gradientCount = nodes.reduce((acc, n) => 
-    acc + n.fills.filter(f => f.type.startsWith('GRADIENT_')).length, 0
-  )
-  
-  metrics.push({
-    label: '渐变填充数量',
-    value: gradientCount,
-    status: gradientCount <= 5 ? 'good' : 'warning',
-  })
-  
-  if (uniqueColors > maxColors) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '色彩',
-      title: '颜色种类过多',
-      description: `当前使用了 ${uniqueColors} 种不同颜色，超过建议的 ${maxColors} 种上限。`,
-      suggestion: '使用颜色样式（Color Styles）统一管理颜色，合并相似颜色',
-      severity: 'medium',
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '色彩',
-      title: '使用 Color Styles 管理颜色',
-      description: `当前使用了 ${uniqueColors} 种不同颜色，建议使用颜色样式（Color Styles）统一管理。`,
-      priority: 'medium',
-      actionable: '创建颜色样式库，将相似颜色合并为统一的 Design Token',
-    })
-  } else if (uniqueColors > 0) {
-    highlights.push({
-      id: `h-${nextIssueId()}`,
-      category: '色彩',
-      title: '颜色管理合理',
-      description: `使用了 ${uniqueColors} 种主要颜色，数量在合理范围内。`,
-    })
-  }
-  
-  return { id: 'color', label: '色彩方案', metrics, highlights, suggestions, issues }
-}
-
-function analyzeSpacing(snapshot: DesignDataSnapshot, rules?: CheckRules): CategoryAnalysis {
-  const spacingRules = rules?.spacing || {}
-  const spacingGrid = spacingRules.spacingGrid ?? 8
-  const spacingTolerance = spacingRules.spacingTolerance ?? 2
-  const minTouchTarget = spacingRules.minTouchTarget ?? 44
-  const minNonTouchTarget = spacingRules.minNonTouchTarget ?? 24
-
-  const { nodes } = snapshot
-  const issues: CheckIssue[] = []
-  const metrics: AnalysisMetric[] = []
-  const highlights: DesignHighlight[] = []
-  const suggestions: ImprovementSuggestion[] = []
-  
-  const frames = nodes.filter(n =>
-    (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE')
-    && n.layoutMode && n.layoutMode !== 'NONE'
-  )
-  
-  metrics.push({
-    label: '启用自动布局容器',
-    value: frames.length,
-    status: frames.length > 0 ? 'good' : 'warning',
-  })
-  
-  if (frames.length === 0) {
-    return { id: 'spacing', label: '间距系统', metrics, highlights, suggestions, issues }
-  }
-  
-  function isOnGrid(value: number): boolean {
-    const remainder = value % spacingGrid
-    return remainder <= spacingTolerance || remainder >= spacingGrid - spacingTolerance
-  }
-
-  const paddings: number[] = []
-  const spacings: number[] = []
-  for (const f of frames) {
-    if (typeof f.padding.top === 'number' && f.padding.top > 0) paddings.push(f.padding.top)
-    if (typeof f.padding.right === 'number' && f.padding.right > 0) paddings.push(f.padding.right)
-    if (typeof f.padding.bottom === 'number' && f.padding.bottom > 0) paddings.push(f.padding.bottom)
-    if (typeof f.padding.left === 'number' && f.padding.left > 0) paddings.push(f.padding.left)
-    if (typeof f.itemSpacing === 'number' && f.itemSpacing > 0) spacings.push(f.itemSpacing)
-    if (typeof f.counterAxisSpacing === 'number' && f.counterAxisSpacing > 0) spacings.push(f.counterAxisSpacing)
-  }
-  
-  const nonStandardPaddings = paddings.filter(p => !isOnGrid(p) && p !== 0)
-  const nonStandardSpacings = spacings.filter(s => !isOnGrid(s) && s !== 0)
-  const totalSpacingCount = paddings.length + spacings.length
-  const nonStandardCount = nonStandardPaddings.length + nonStandardSpacings.length
-  
-  const standardRate = totalSpacingCount > 0
-    ? Math.round(((totalSpacingCount - nonStandardCount) / totalSpacingCount) * 100)
-    : 100
-  
-  metrics.push(
-    {
-      label: '标准间距使用率',
-      value: `${standardRate}%`,
-      status: standardRate >= 90 ? 'good' : standardRate >= 70 ? 'warning' : 'error',
-      expected: '>= 90%',
-      actual: `${standardRate}%`,
-    },
-    { label: 'padding 数量', value: paddings.length, status: 'good' },
-    { label: 'itemSpacing 数量', value: spacings.length, status: 'good' },
-    { label: '非标准间距', value: nonStandardCount, status: nonStandardCount === 0 ? 'good' : 'warning', expected: '0', actual: `${nonStandardCount}` },
-  )
-  
-  if (nonStandardCount > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '间距',
-      title: '间距系统不统一',
-      description: `检测到 ${nonStandardCount} 处非 ${spacingGrid}px 倍数的间距值（padding: ${nonStandardPaddings.length}, spacing: ${nonStandardSpacings.length}）。`,
-      suggestion: `统一使用 ${spacingGrid}px 基准间距系统`,
-      severity: 'medium',
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '间距',
-      title: '统一间距系统',
-      description: `${nonStandardCount} 处间距值不符合 ${spacingGrid}px 基准系统，建议统一调整。`,
-      priority: 'medium',
-      affectedNodes: nonStandardCount,
-      actionable: `将所有间距值调整为 ${spacingGrid}px 的倍数（允许±${spacingTolerance}px误差）`,
-    })
-  } else if (paddings.length > 0) {
-    highlights.push({
-      id: `h-${nextIssueId()}`,
-      category: '间距',
-      title: '间距系统规范',
-      description: `${totalSpacingCount} 处间距值均符合 ${spacingGrid}px 倍数规范。`,
-    })
-  }
-  
-  // 触控目标检测
-  const smallTouchTargets = nodes.filter(n => {
-    const isInteractive = /button|btn|cta|action|tap|touch|icon[_-]?button|nav[_-]?item/i.test(n.name || '')
-      || n.type === 'COMPONENT' || n.type === 'INSTANCE'
-    if (!isInteractive) return false
-    const box = n.bounds
-    if (!box) return false
-    return (box.width < minTouchTarget || box.height < minTouchTarget) && box.width > minNonTouchTarget / 2 && box.height > minNonTouchTarget / 2
-  })
-  
-  metrics.push({
-    label: '过小触控区域',
-    value: smallTouchTargets.length,
-    status: smallTouchTargets.length === 0 ? 'good' : 'error',
-    expected: '0',
-    actual: `${smallTouchTargets.length}`,
-  })
-  
-  if (smallTouchTargets.length > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '间距',
-      title: '触控区域过小',
-      description: `检测到 ${smallTouchTargets.length} 个交互元素尺寸小于 ${minTouchTarget}x${minTouchTarget}px 最小标准。`,
-      suggestion: `增大触控区域至 ${minTouchTarget}x${minTouchTarget}px 以上`,
-      severity: 'high',
-      nodeName: smallTouchTargets[0]?.name,
-      position: smallTouchTargets[0]?.bounds || undefined,
-    })
-    suggestions.push({
-      id: `s-${nextIssueId()}`,
-      category: '间距',
-      title: '增大触控区域',
-      description: `${smallTouchTargets.length} 个交互元素尺寸小于 ${minTouchTarget}x${minTouchTarget}px，难以精准点击。`,
-      priority: 'high',
-      affectedNodes: smallTouchTargets.length,
-      actionable: `将所有按钮/交互元素尺寸增大至 ${minTouchTarget}x${minTouchTarget}px 以上`,
-    })
-  }
-  
-  // 检查padding一致性
-  for (const frame of frames) {
-    const { top, right, bottom, left } = frame.padding
-    if (top !== bottom || left !== right) {
-      issues.push({
-        id: nextIssueId(),
-        type: 'info',
-        category: '间距',
-        title: `"${frame.name}" padding 不对称`,
-        description: `padding: ${top}px ${right}px ${bottom}px ${left}px`,
-        suggestion: '考虑使用对称的 padding 值',
-        severity: 'low',
-        nodeId: frame.id,
-        nodeName: frame.name,
-      })
-    }
-  }
-  
-  return { id: 'spacing', label: '间距系统', metrics, highlights, suggestions, issues }
-}
-
-function analyzeEffects(snapshot: DesignDataSnapshot, rules?: CheckRules): CategoryAnalysis {
-  const effectsRules = rules?.effects || {}
-  const maxShadows = effectsRules.maxShadows ?? 10
-  const maxBlurRadius = effectsRules.maxBlurRadius ?? 50
-  const warnLargeAreaBlur = effectsRules.warnLargeAreaBlur ?? true
-  const largeBlurAreaThreshold = effectsRules.largeBlurAreaThreshold ?? 50000
-
-  const { nodes } = snapshot
-  const issues: CheckIssue[] = []
-  const metrics: AnalysisMetric[] = []
-  const highlights: DesignHighlight[] = []
-  const suggestions: ImprovementSuggestion[] = []
-  
-  const nodesWithEffects = nodes.filter(n => n.effects && n.effects.length > 0)
-  const shadowCount = nodes.reduce((acc, n) => 
-    acc + n.effects.filter(e => e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW').length, 0
-  )
-  const blurCount = nodes.reduce((acc, n) => 
-    acc + n.effects.filter(e => e.type === 'LAYER_BLUR' || e.type === 'BACKGROUND_BLUR').length, 0
-  )
-  
-  metrics.push(
-    { label: '带效果节点数', value: nodesWithEffects.length, status: 'good' },
-    { label: '阴影效果数', value: shadowCount, status: shadowCount <= maxShadows ? 'good' : 'warning' },
-    { label: '模糊效果数', value: blurCount, status: blurCount <= 5 ? 'good' : 'warning' },
-  )
-  
-  // 检查过度使用效果
-  if (shadowCount > maxShadows * 1.5) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '视觉效果',
-      title: '阴影效果过多',
-      description: `检测到 ${shadowCount} 个阴影效果，超过建议的 ${maxShadows} 个，过多阴影会影响性能和视觉一致性。`,
-      suggestion: '减少阴影使用，统一阴影参数',
-      severity: 'medium',
-    })
-  }
-  
-  // 检查模糊半径过大
-  const largeRadiusBlurNodes = nodes.filter(n => {
-    return n.effects.some(e => 
-      (e.type === 'LAYER_BLUR' || e.type === 'BACKGROUND_BLUR') && e.radius && e.radius > maxBlurRadius
-    )
-  })
-
-  if (largeRadiusBlurNodes.length > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '视觉效果',
-      title: '模糊半径过大',
-      description: `${largeRadiusBlurNodes.length} 个节点使用了超过 ${maxBlurRadius}px 的模糊半径，可能影响渲染性能。`,
-      suggestion: `降低模糊半径至 ${maxBlurRadius}px 以内`,
-      severity: 'medium',
-    })
-  }
-
-  // 检查大面积模糊效果性能影响
-  const largeBlurNodes = warnLargeAreaBlur ? nodes.filter(n => {
-    const box = n.bounds
-    const hasBlur = n.effects.some(e => (e.type === 'LAYER_BLUR' || e.type === 'BACKGROUND_BLUR') && e.radius && e.radius > 0)
-    const area = box ? box.width * box.height : 0
-    return hasBlur && area > largeBlurAreaThreshold
-  }) : []
-  
-  if (largeBlurNodes.length > 0) {
-    issues.push({
-      id: nextIssueId(),
-      type: 'warning',
-      category: '视觉效果',
-      title: '大面积模糊效果',
-      description: `${largeBlurNodes.length} 个大面积节点（>${Math.round(largeBlurAreaThreshold / 10000)}万px²）使用了模糊效果，可能影响渲染性能。`,
-      suggestion: '减少大面积模糊的使用或降低模糊半径',
-      severity: 'medium',
-    })
-  }
-  
-  // 检查效果一致性（相同类型节点应有相同效果）
-  const componentEffectsMap = new Map<string, { shadows: number; blurs: number }>()
-  for (const node of nodes) {
-    if (node.isInstance && node.componentId) {
-      const key = node.componentId
-      const current = componentEffectsMap.get(key) || { shadows: 0, blurs: 0 }
-      current.shadows += node.effects.filter(e => e.type === 'DROP_SHADOW').length
-      current.blurs += node.effects.filter(e => e.type === 'BACKGROUND_BLUR').length
-      componentEffectsMap.set(key, current)
-    }
-  }
-  
-  // 检查实例效果不一致
-  for (const [compId, counts] of componentEffectsMap) {
-    if (counts.shadows > 0 && counts.shadows < nodes.filter(n => n.componentId === compId).length) {
-      issues.push({
-        id: nextIssueId(),
-        type: 'info',
-        category: '视觉效果',
-        title: '组件实例效果不一致',
-        description: `部分组件实例缺少阴影效果`,
-        suggestion: '确保同一组件的所有实例使用一致的效果',
-        severity: 'low',
-      })
-    }
-  }
-  
-  return { id: 'effects', label: '视觉效果', metrics, highlights, suggestions, issues }
-}
-
-// ===== 主分析函数 =====
-
-export function analyzeFigmaDocument(apiResponse: any, fileKey?: string, rules?: CheckRules): AnalysisResult {
   issueIdCounter = 0
-  
-  const effectiveRules: CheckRules = rules || {
-    name: '默认规则',
-    layout: { requireAutoLayout: false, autoLayoutMinRate: 50, maxAbsoluteInAutoLayout: 0, maxLargeFrameWithoutConstraint: 800 },
-    typography: { maxFontFamilies: 2, maxFontSizes: 6, maxFontWeights: 4, minTextSize: 12, maxLineHeightRatio: 2 },
-    color: { minContrastNormal: 4.5, minContrastLarge: 3.0, maxColors: 20, warnLowOpacityText: true, minTextOpacity: 0.4 },
-    spacing: { spacingGrid: 8, spacingTolerance: 2, minTouchTarget: 44, minNonTouchTarget: 24 },
-    effects: { maxShadows: 10, maxBlurRadius: 50, warnLargeAreaBlur: true, largeBlurAreaThreshold: 50000 },
+  const effectiveRules: CheckRules = {
+    ...DEFAULT_RULES, ...rules,
+    ...Object.fromEntries(['layout', 'typography', 'color', 'spacing', 'effects', 'designSystem', 'interaction']
+      .map(key => [key, { ...(DEFAULT_RULES as any)[key], ...(rules as any)?.[key] }])),
   }
-  
-  // 提取完整设计数据快照
-  const snapshot = extractAllDesignData(apiResponse, fileKey)
-  
-  // Figma API 返回格式: { name, document: DOCUMENT_NODE, components, ... }
-  const document: FigmaNode = apiResponse?.document || apiResponse
-  const fileName = apiResponse?.name || document?.name || '未命名文件'
-  
-  if (!document || !document.children) {
-    return {
-      issues: [],
-      categories: [],
-      frameCount: 0,
-      textCount: 0,
-      totalNodes: 0,
-      frameNodeIds: [],
-      frames: [],
-      highlights: [],
-      suggestions: [],
-      documentInfo: { name: fileName, pageCount: 0, componentCount: 0, instanceCount: 0 },
-      dataSnapshot: snapshot,
-      integrityReport: snapshot.integrityReport,
+  const snapshot = extractAllDesignData(apiResponse, fileKey, options.targetNodeId)
+  const { nodes, nodeMap } = snapshot
+  const visible = nodes.filter(n => n.visible !== false)
+  const scopeIds = new Set(nodes.map(n => n.id))
+  const children = new Map<string, ExtractedNode[]>()
+  for (const n of nodeMap.values()) if (n.parentId) {
+    if (!children.has(n.parentId)) children.set(n.parentId, [])
+    children.get(n.parentId)!.push(n)
+  }
+  const categoryNames: Record<string, string> = {
+    layout: '布局', typography: '字体', color: '色彩', spacing: '间距',
+    effects: '视觉效果', designSystem: '设计系统', interaction: '交互可达性',
+  }
+  const categories = Object.entries(categoryNames).map(([id, label]): CategoryAnalysis => ({
+    id, label, metrics: [], highlights: [], suggestions: [], issues: [],
+  }))
+  const category = (id: string) => categories.find(c => c.id === id)!
+  const metric = (id: string, label: string, value: string | number, status: AnalysisMetric['status'] = 'good', expected?: string) =>
+    category(id).metrics.push({ label, value, status, expected })
+  function issue(id: string, ruleId: string, title: string, affected: ExtractedNode[], actual: string,
+    expected: string, suggestion: string, status: CheckIssue['status'] = 'open', evidence?: string) {
+    if (!affected.length || affected.some(n => !scopeIds.has(n.id))) return
+    const node = affected[0]
+    category(id).issues.push({
+      id: nextIssueId(), ruleId, category: categoryNames[id], title, source: 'rule', status,
+      type: status === 'uncheckable' ? 'info' : status === 'review' ? 'warning' : 'error',
+      severity: status === 'open' ? 'medium' : 'low',
+      description: actual, actualValue: actual, expectedValue: expected, suggestion,
+      evidence: evidence || (actual + (expected ? '；规则：' + expected : '')),
+      nodeId: node.id, nodeName: node.name, nodePath: node.nodePath,
+      affectedNodeIds: affected.map(n => n.id),
+      position: validBounds(node.bounds) ? node.bounds : undefined,
+      figmaUrl: fileKey ? 'https://www.figma.com/design/' + fileKey + '/?node-id=' + encodeURIComponent(node.id) : undefined,
+    })
+  }
+  const l = effectiveRules.layout!
+  const containers = visible.filter(n => ['FRAME', 'COMPONENT', 'COMPONENT_SET', 'INSTANCE'].includes(n.type) && n.childCount > 0)
+  const manual = containers.filter(n => !n.layoutMode || n.layoutMode === 'NONE')
+  const auto = containers.filter(n => n.layoutMode && n.layoutMode !== 'NONE')
+  const rate = containers.length ? Math.round(auto.length / containers.length * 100) : null
+  metric('layout', '容器总数', containers.length)
+  metric('layout', '自动布局使用率', rate === null ? '不适用' : rate + '%', rate === null ? 'unknown' : rate >= l.autoLayoutMinRate! ? 'good' : 'warning', '≥ ' + l.autoLayoutMinRate + '%')
+  if (manual.length && (l.requireAutoLayout || (rate !== null && rate < l.autoLayoutMinRate!))) {
+    issue('layout', 'layout.auto', '自动布局覆盖率低于所选规则', manual, auto.length + '/' + containers.length + ' 个容器启用 Auto Layout',
+      l.requireAutoLayout ? '全部容器启用' : '使用率 ≥ ' + l.autoLayoutMinRate + '%',
+      '核对固定布局或装饰容器是否应豁免；未使用 Auto Layout 本身不等于布局错误', l.requireAutoLayout ? 'open' : 'review')
+  }
+  const absolute = visible.filter(n => n.layoutPositioning === 'ABSOLUTE' && n.parentId && auto.some(p => p.id === n.parentId))
+  if (absolute.length > l.maxAbsoluteInAutoLayout!) issue('layout', 'layout.absolute', '自动布局内的绝对定位待确认', absolute,
+    absolute.length + ' 个子节点 layoutPositioning=ABSOLUTE', '≤ ' + l.maxAbsoluteInAutoLayout,
+    '确认是否为有意叠放的图标或装饰', 'review')
+  const large = manual.filter(n => validBounds(n.bounds) && n.bounds.width > l.maxLargeFrameWithoutConstraint!)
+  if (large.length) issue('layout', 'layout.large', '大尺寸固定布局待确认', large,
+    large.length + ' 个宽度 > ' + l.maxLargeFrameWithoutConstraint + 'px 的容器未启用 Auto Layout', '项目布局建议',
+    '结合实际分辨率和约束设置评估；不据此判定缺少约束', 'review')
+  const depth = (n: ExtractedNode): number => n.parentId && scopeIds.has(n.parentId) ? 1 + depth(nodeMap.get(n.parentId)!) : 0
+  metric('layout', '最大嵌套深度', nodes.reduce((max, n) => Math.max(max, depth(n)), 0))
+
+  const t = effectiveRules.typography!
+  const texts = visible.filter(n => n.type === 'TEXT')
+  metric('typography', '可见文本节点', texts.length)
+  const usableTexts = texts.filter(n => !n.mixedTextStyle && Number.isFinite(n.style?.fontSize))
+  const missingStyles = texts.filter(n => !usableTexts.includes(n))
+  if (missingStyles.length) issue('typography', 'text.unavailable', '部分文本样式无法完整检测', missingStyles,
+    missingStyles.length + ' 个节点缺少字号或包含混合文本样式', '完整单一样式数据',
+    '在 Figma 中按文本范围检查；这些节点未按单一字号判定', 'uncheckable')
+  for (const [label, field, limit] of [
+    ['字号种类', 'fontSize', t.maxFontSizes], ['字体种类', 'fontFamily', t.maxFontFamilies], ['字重种类', 'fontWeight', t.maxFontWeights],
+  ] as const) {
+    const known = usableTexts.filter(n => n.style?.[field] !== undefined)
+    const values = new Set(known.map(n => n.style![field]))
+    metric('typography', label, known.length ? values.size : '未提供', known.length ? values.size > limit! ? 'warning' : 'good' : 'unknown', '≤ ' + limit)
+    if (values.size > limit!) issue('typography', 'text.' + field, label + '超过所选规则', known,
+      [...values].join('、'), '种类 ≤ ' + limit, '核对并统一文本样式')
+  }
+  for (const n of usableTexts) {
+    const size = n.style!.fontSize!
+    if (size < t.minTextSize!) issue('typography', 'text.minSize', '“' + n.name + '” 字号低于所选规则', [n],
+      'fontSize=' + size + 'px', '≥ ' + t.minTextSize + 'px', '按项目规范调整字号')
+    if (size > 0 && n.style?.lineHeightPx && n.style.lineHeightPx / size > t.maxLineHeightRatio!) {
+      issue('typography', 'text.lineHeight', '“' + n.name + '” 行高比例待确认', [n],
+        'lineHeightPx=' + n.style.lineHeightPx + '；fontSize=' + size, '行高/字号 ≤ ' + t.maxLineHeightRatio,
+        '核对多行内容是否有意使用较大行高', 'review')
     }
   }
-  
-  const { nodes, nodeMap, parentMap } = snapshot
-  
-  // 收集顶层画板
-  const topFrames = nodes.filter(n => 
-    n.parentId && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'COMPONENT_SET')
-  )
-  const frameNodeIds = topFrames.map(n => n.id)
-  const frames = topFrames.map(n => n.name || '未命名画板')
-  
-  const textCount = nodes.filter(n => n.type === 'TEXT').length
-  const frameCount = topFrames.length
-  const pageCount = nodes.filter(n => n.type === 'CANVAS').length
-  const componentCount = nodes.filter(n => n.isComponent).length
-  const instanceCount = nodes.filter(n => n.isInstance).length
-  
-  // 执行各维度分析
-  const layoutResult = analyzeLayout(snapshot, effectiveRules)
-  const typographyResult = analyzeTypography(snapshot, effectiveRules)
-  const colorResult = analyzeColor(snapshot, effectiveRules)
-  const spacingResult = analyzeSpacing(snapshot, effectiveRules)
-  const effectsResult = analyzeEffects(snapshot, effectiveRules)
-  
-  const issues: CheckIssue[] = [
-    ...layoutResult.issues,
-    ...typographyResult.issues,
-    ...colorResult.issues,
-    ...spacingResult.issues,
-    ...effectsResult.issues,
-  ]
-  
-  const highlights: DesignHighlight[] = [
-    ...layoutResult.highlights,
-    ...typographyResult.highlights,
-    ...colorResult.highlights,
-    ...spacingResult.highlights,
-    ...effectsResult.highlights,
-  ]
-  
-  const suggestions: ImprovementSuggestion[] = [
-    ...layoutResult.suggestions,
-    ...typographyResult.suggestions,
-    ...colorResult.suggestions,
-    ...spacingResult.suggestions,
-    ...effectsResult.suggestions,
-  ].sort((a, b) => {
-    const order = { high: 0, medium: 1, low: 2 }
-    return order[a.priority] - order[b.priority]
-  })
-  
-  const categories: CategoryAnalysis[] = [
-    layoutResult,
-    typographyResult,
-    colorResult,
-    spacingResult,
-    effectsResult,
-  ]
-  
+
+  const c = effectiveRules.color!
+  let checkedContrast = 0
+  let skippedContrast = 0
+  let failedContrast = 0
+  for (const n of texts) {
+    const sample = resolveContrast(n, snapshot, children)
+    const size = n.style?.fontSize
+    const weight = n.style?.fontWeight
+    if (!sample || !Number.isFinite(size) || (size! < 24 && size! >= 18.67 && !Number.isFinite(weight))) {
+      skippedContrast++
+      issue('color', 'contrast.unavailable', '“' + n.name + '” 对比度未能检测', [n],
+        '缺少可验证的纯色前景/背景、单一样式或存在遮挡、透明、效果、范围外背景', '可验证的单一不透明色对',
+        '在原稿中确认实际背景并测量；不使用默认背景或 AI 猜测数值', 'uncheckable')
+      continue
+    }
+    checkedContrast++
+    const threshold = size! >= 24 || (size! >= 18.67 && weight! >= 700) ? c.minContrastLarge! : c.minContrastNormal!
+    const ratio = getContrastRatio(sample.foreground, sample.background)
+    if (ratio < threshold) {
+      failedContrast++
+      const fg = rgbaToHex(sample.foreground.r, sample.foreground.g, sample.foreground.b)
+      const bg = rgbaToHex(sample.background.r, sample.background.g, sample.background.b)
+      issue('color', 'contrast.minimum', '“' + n.name + '” 对比度低于所选规则', [n],
+        ratio.toFixed(2) + ':1', '≥ ' + threshold + ':1', '调整前景色或背景色后重新读取检测', 'open',
+        '前景 ' + fg + '；最近可验证背景 ' + bg + '（节点 ' + sample.backgroundNode.id + '）；字号=' + size + 'px；字重=' + (weight ?? '未提供') + '；未四舍五入比值=' + ratio)
+    }
+  }
+  metric('color', '已实测对比度文本', checkedContrast)
+  metric('color', '对比度低于规则', failedContrast, checkedContrast ? failedContrast ? 'error' : 'good' : 'unknown')
+  metric('color', '未能检测对比度', skippedContrast, skippedContrast ? 'unknown' : 'good')
+  const colors = new Set(visible.flatMap(n => n.fills.filter(f => f.visible && f.color).map(f => f.hex)))
+  metric('color', '可见节点填充色种类', colors.size, colors.size > c.maxColors! ? 'warning' : 'good', '≤ ' + c.maxColors)
+  if (colors.size > c.maxColors!) issue('color', 'color.count', '填充色种类超过所选规则', visible.filter(n => n.fills.some(f => f.visible && f.color)),
+    colors.size + ' 种填充色', '≤ ' + c.maxColors, '核对是否需要合并为样式或变量')
+  if (c.warnLowOpacityText) for (const n of texts) {
+    const fills = n.fills.filter(f => f.visible && f.type === 'SOLID' && f.color)
+    if (fills.length !== 1 || n.mixedTextStyle) continue
+    const opacity = (n.opacity ?? 1) * fills[0].opacity * (fills[0].color?.a ?? 1)
+    if (opacity > 0 && opacity < c.minTextOpacity!) issue('color', 'color.opacity', '“' + n.name + '” 文字透明度偏低', [n],
+      '本层有效不透明度=' + opacity, '≥ ' + c.minTextOpacity, '确认是否为禁用状态；不据此推断对比度', 'review')
+  }
+
+  const s = effectiveRules.spacing!
+  const grid = s.spacingGrid!
+  if (!(grid > 0)) throw new Error('间距基准必须大于 0，无法执行该规则')
+  const onGrid = (value: number) => Math.abs(value - Math.round(value / grid) * grid) <= s.spacingTolerance!
+  for (const n of auto) {
+    const values = { ...n.padding, itemSpacing: n.itemSpacing, counterAxisSpacing: n.counterAxisSpacing }
+    const offGrid = Object.entries(values).filter(([, value]) => typeof value === 'number' && !onGrid(value))
+    if (offGrid.length) issue('spacing', 'spacing.grid', '“' + n.name + '” 间距不符合所选网格', [n],
+      offGrid.map(([key, value]) => key + '=' + value + 'px').join('；'), grid + 'px 倍数，容差 ±' + s.spacingTolerance + 'px',
+      '按所选间距规则调整或修订项目规则')
+  }
+  // A component is not necessarily an interactive target. Naming is only a clue, never proof.
+  const candidates = visible.filter(n => /button|btn|cta|switch|slider|按钮|开关|滑块|点击/i.test(n.name) ||
+    n.reactions?.some(r => ['ON_CLICK', 'ON_PRESS', 'ON_DRAG'].includes(r.trigger?.type || '')))
+  const smallTargets = candidates.filter(n => validBounds(n.bounds) && (n.bounds.width < s.minTouchTarget! || n.bounds.height < s.minTouchTarget!))
+  metric('spacing', '候选交互节点', candidates.length)
+  metric('spacing', '尺寸待核对的候选节点', smallTargets.length, smallTargets.length ? 'warning' : 'good')
+  for (const n of smallTargets) issue('spacing', 'touch.candidate', '“' + n.name + '” 触控尺寸待确认', [n],
+    '可视边界=' + n.bounds!.width + '×' + n.bounds!.height + 'px', '项目候选目标阈值 ≥ ' + s.minTouchTarget + '×' + s.minTouchTarget + 'px',
+    '核对真实热区与控件类型；视觉尺寸不等于实际触控热区', 'review',
+    '候选依据：名称或原型触发器；absoluteBoundingBox=' + JSON.stringify(n.bounds))
+
+  const e = effectiveRules.effects!
+  const shadows = visible.filter(n => n.effects.some(f => f.visible && /SHADOW/.test(f.type)))
+  const shadowCount = visible.reduce((sum, n) => sum + n.effects.filter(f => f.visible && /SHADOW/.test(f.type)).length, 0)
+  metric('effects', '可见阴影效果数', shadowCount, shadowCount > e.maxShadows! ? 'warning' : 'good')
+  if (shadowCount > e.maxShadows!) issue('effects', 'effects.shadows', '阴影数量超过所选规则', shadows,
+    shadowCount + ' 个可见阴影', '≤ ' + e.maxShadows, '核对视觉层级和目标设备渲染成本', 'review')
+  for (const n of visible) for (const effect of n.effects.filter(f => f.visible && /BLUR/.test(f.type))) {
+    const area = validBounds(n.bounds) ? n.bounds.width * n.bounds.height : undefined
+    if ((effect.radius ?? 0) > e.maxBlurRadius! || (e.warnLargeAreaBlur && area !== undefined && area > e.largeBlurAreaThreshold!)) {
+      issue('effects', 'effects.blur', '“' + n.name + '” 模糊效果待确认', [n],
+        effect.type + '；radius=' + (effect.radius ?? '未提供') + '；图层面积=' + (area ?? '未提供'),
+        '半径 ≤ ' + e.maxBlurRadius + 'px；面积 ≤ ' + e.largeBlurAreaThreshold + 'px²',
+        '在真实设备测量性能，不能仅凭设计文件认定性能故障', 'review')
+    }
+  }
+
+  const d = effectiveRules.designSystem!
+  const eligible = visible.filter(n => n.type === 'TEXT' || n.fills.length || n.strokes.length || n.effects.length)
+  const styled = eligible.filter(n => Object.values(n.styleIds).some(Boolean))
+  const bound = eligible.filter(n => n.boundVariableCount > 0)
+  for (const [label, list, minimum, ruleId] of [
+    ['Style 引用覆盖率', styled, d.minStyleCoverage, 'system.styles'],
+    ['可见变量绑定覆盖率', bound, d.minVariableCoverage, 'system.variables'],
+  ] as const) {
+    const coverage = eligible.length ? Math.round(list.length / eligible.length * 100) : null
+    metric('designSystem', label, coverage === null ? '不适用' : coverage + '%', coverage === null ? 'unknown' : coverage < minimum! ? 'warning' : 'good', '≥ ' + minimum + '%')
+    if (coverage !== null && coverage < minimum!) issue('designSystem', ruleId, label + '低于项目建议',
+      eligible.filter(n => !list.includes(n)), list.length + '/' + eligible.length + ' 个可样式化节点有引用',
+      '覆盖率 ≥ ' + minimum + '%', '核对团队规范；原始 API 未返回引用不等于视觉不合格', 'review')
+  }
+  const generic = visible.filter(n => /^(Frame|Group|Rectangle|Vector|Ellipse|Text|框架|组|矩形|文本)(\s*\d+)?$/i.test(n.name))
+  metric('designSystem', '通用名称节点', generic.length, generic.length > d.maxGenericNames! ? 'warning' : 'good')
+  if (generic.length > d.maxGenericNames!) issue('designSystem', 'system.naming', '通用图层命名待整理', generic,
+    generic.length + ' 个节点使用通用名称', '≤ ' + d.maxGenericNames, '按语义重命名以便交付与定位', 'review')
+  const hiddenLarge = nodes.filter(n => n.visible === false && validBounds(n.bounds) && n.bounds.width * n.bounds.height > d.hiddenLargeNodeArea!)
+  if (hiddenLarge.length) issue('designSystem', 'system.hidden', '隐藏大图层待确认', hiddenLarge,
+    hiddenLarge.length + ' 个不可见图层面积超过 ' + d.hiddenLargeNodeArea + 'px²', '项目整理建议',
+    '可能是备用状态或资源；不要未经确认删除', 'review')
+  if (d.disallowEmbeddedMainComponents) {
+    const embedded = visible.filter(n => n.type === 'COMPONENT' && n.parentId && !['CANVAS', 'COMPONENT_SET'].includes(nodeMap.get(n.parentId)?.type || ''))
+    if (embedded.length) issue('designSystem', 'system.masters', '画面内主组件待确认', embedded,
+      embedded.length + ' 个主组件嵌入普通容器', '优先复用实例（项目建议）', '区分组件库画板与产品画面，再决定是否替换', 'review')
+  }
+
+  const i = effectiveRules.interaction!
+  const reactionNodes = visible.filter(n => n.reactions?.length || n.transitionNodeID)
+  const reactionCount = reactionNodes.reduce((sum, n) => sum + (n.reactions?.length || (n.transitionNodeID ? 1 : 0)), 0)
+  metric('interaction', '快照中的原型交互数', reactionCount, reactionCount < i.minReactionCount! ? 'unknown' : 'good')
+  if (reactionCount < i.minReactionCount!) issue('interaction', 'interaction.coverage', '原型交互数据不足', visible.slice(0, 1),
+    '读取到 ' + reactionCount + ' 条交互', '所选规则建议 ≥ ' + i.minReactionCount,
+    '静态文件不能证明业务流程缺失；需运行原型确认', 'uncheckable')
+  for (const n of reactionNodes) {
+    const actions = n.reactions?.flatMap(r => r.actions || (r.action ? [r.action] : [])) || []
+    const destinations = [...actions.map(a => a.destinationId), n.transitionNodeID].filter((id): id is string => !!id)
+    const outside = destinations.filter(id => !scopeIds.has(id))
+    if (outside.length) issue('interaction', 'interaction.destination', '跳转目标不在本次检测范围', [n],
+      'destinationId=' + outside.join('、'), '需读取目标节点', '打开原型核对目标；不将范围外节点判为失效链接', 'uncheckable')
+  }
+  if (i.warnClippedOverflowWithoutScroll) for (const n of visible) {
+    if (!n.clipsContent || (n.overflowDirection && n.overflowDirection !== 'NONE') || !validBounds(n.bounds)) continue
+    const overflow = (children.get(n.id) || []).filter(child => scopeIds.has(child.id) && child.visible !== false && validBounds(child.bounds) && !contains(n.bounds!, child.bounds))
+    if (overflow.length) issue('interaction', 'interaction.clipping', '“' + n.name + '” 裁剪溢出待确认', [n, ...overflow],
+      overflow.length + ' 个直接子节点超出边界；clipsContent=true；overflowDirection=' + (n.overflowDirection || 'NONE'),
+      '确认裁剪是否符合预期', '可能是装饰或刻意裁剪；在原型中验证内容是否需要滚动访问', 'review',
+      '容器 ' + n.id + ' bounds=' + JSON.stringify(n.bounds) + '；超出节点=' + overflow.map(child => child.id).join('、'))
+  }
+
+  const topFrames = visible.filter(n => validBounds(n.bounds) && (n.id === normalizeNodeId(options.targetNodeId) ||
+    (['FRAME', 'COMPONENT', 'COMPONENT_SET'].includes(n.type) && (!n.parentId || !scopeIds.has(n.parentId) || nodeMap.get(n.parentId)?.type === 'CANVAS'))))
+  const issues = categories.flatMap(c => c.issues)
   return {
-    issues,
-    categories,
-    frameCount,
-    textCount,
-    totalNodes: nodes.length,
-    frameNodeIds,
-    frames,
-    highlights,
-    suggestions,
-    documentInfo: {
-      name: fileName,
-      pageCount,
-      componentCount,
-      instanceCount,
+    issues, categories, frameCount: topFrames.length, textCount: texts.length, totalNodes: nodes.length,
+    frameNodeIds: topFrames.map(n => n.id), frames: topFrames.map(n => n.name),
+    highlights: [], suggestions: [],
+    documentInfo: { name: snapshot.fileName, pageCount: snapshot.pageCount, componentCount: snapshot.componentCount, instanceCount: snapshot.instanceCount },
+    dataSnapshot: snapshot, integrityReport: snapshot.integrityReport,
+    auditMeta: {
+      source: 'figma-rest-api', strategy: 'rule-first-ai-assisted', readOnly: true,
+      scope: options.targetNodeId ? 'node' : 'file', targetNodeId: normalizeNodeId(options.targetNodeId),
+      targetNodeName: options.targetNodeId ? nodeMap.get(normalizeNodeId(options.targetNodeId)!)?.name : undefined,
+      targetFound: true, ruleSetName: effectiveRules.name, rulesSnapshot: effectiveRules,
+      fileKey: fileKey || '', fileVersion: typeof apiResponse.version === 'string' ? apiResponse.version : undefined,
+      lastModified: typeof apiResponse.lastModified === 'string' ? apiResponse.lastModified : undefined,
+      fetchedAt: options.fetchedAt, analyzedAt: new Date().toISOString(), documentHash: options.documentHash,
+      hiddenNodeCount: nodes.length - visible.length,
+      aiReview: { status: 'pending', findingCount: 0, message: '规则结果不依赖 AI；截图复核只提供待确认建议' },
     },
-    dataSnapshot: snapshot,
-    integrityReport: snapshot.integrityReport,
   }
 }
 
 export function getIssuesByCategory(issues: CheckIssue[], category: string): CheckIssue[] {
-  const catMap: Record<string, string> = {
-    layout: '布局',
-    typography: '字体',
-    color: '色彩',
-    spacing: '间距',
-    effects: '视觉效果',
-  }
-  return issues.filter(i => i.category === catMap[category])
+  const labels: Record<string, string> = { layout: '布局', typography: '字体', color: '色彩', spacing: '间距', effects: '视觉效果', designSystem: '设计系统', interaction: '交互可达性' }
+  return issues.filter(i => i.category === labels[category])
 }

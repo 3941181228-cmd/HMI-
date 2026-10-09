@@ -50,7 +50,7 @@ function hsl(h: number, s: number, l: number): HSLValue {
 export const themes: HMITheme[] = [
   {
     id: 'xiaomi-violet',
-    name: '小米紫',
+    name: '紫罗兰',
     description: '科技感紫色主题，深蓝黑底色，温暖紫罗兰高亮',
     preview: {
       gradient: 'from-violet-500 to-purple-600',
@@ -86,7 +86,7 @@ export const themes: HMITheme[] = [
   },
   {
     id: 'tesla-white',
-    name: '特斯拉白',
+    name: '珍珠白',
     description: '极简白色主题，近白底色，冷灰蓝点缀',
     preview: {
       gradient: 'from-gray-200 to-white',
@@ -122,7 +122,7 @@ export const themes: HMITheme[] = [
   },
   {
     id: 'porsche-red',
-    name: '保时捷红',
+    name: '朱砂红',
     description: '运动豪华主题，深碳灰底色，赛车红高亮',
     preview: {
       gradient: 'from-red-600 to-red-400',
@@ -158,7 +158,7 @@ export const themes: HMITheme[] = [
   },
   {
     id: 'nio-deep',
-    name: '蔚来深色',
+    name: '深岩蓝',
     description: '高端深色主题，深石板蓝底，静谧蓝点缀',
     preview: {
       gradient: 'from-slate-600 to-slate-400',

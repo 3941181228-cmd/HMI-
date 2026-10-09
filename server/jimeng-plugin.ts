@@ -1,3 +1,5 @@
+// @ts-ignore Shared handler is JavaScript ESM, also used by the hosted Worker.
+import analyzeHmi from './hmi-analysis.mjs'
 import type { Plugin, ViteDevServer } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'http'
 import https from 'node:https'
@@ -424,7 +426,16 @@ export function jimengServerPlugin(env?: Record<string, string>): Plugin {
         const body = await readBody(req)
         try {
           const data = JSON.parse(body)
-          const mode = data.mode || 'png2svg' // 'png2svg' | 'text_extract'
+          const mode = data.mode || 'png2svg'
+          if (mode === 'design_audit') {
+            const result = await analyzeHmi({ httpMethod: req.method, body }, {
+              ARK_API_KEY: storedApiKey, VISION_ENDPOINT_ID: storedVisionEndpoint,
+            })
+            res.statusCode = result.statusCode
+            res.setHeader('Content-Type', 'application/json')
+            res.end(result.body)
+            return
+          }
           const imageBase64 = data.image_base64 || ''
           if (!imageBase64) { json(res, 400, { error: 'image_base64 is required' }); return }
 

@@ -1,3 +1,4 @@
+import { validateVisualAudit } from '../../shared/audit-contract.mjs'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ARK_BASE, JIMENG_API_KEY, STORED_VISION_ENDPOINT } from '../_shared'
 
@@ -179,6 +180,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const data = req.body
     const mode = data.mode || 'png2svg'
+    if (!['png2svg', 'text_extract', 'design_audit'].includes(mode)) {
+      res.status(400).json({ ok: false, error: '不支持的分析模式' })
+      return
+    }
     const imageBase64 = data.image_base64 || ''
     if (!imageBase64) {
       res.status(400).json({ error: 'image_base64 is required' })
@@ -207,6 +212,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   "summary": "整体文本概要"
 }
 只返回纯 JSON，不要其他文字。`
+    } else if (mode === 'design_audit') {
+      systemPrompt = `你是 HMI 设计规范的视觉复核专家。规则引擎已经先读取真实 Figma 节点数据；你只补充截图才能判断的问题。检查信息层级、可读性、状态辨识、空白或遮挡异常、入口可达性、本地化风险、主题与实际视觉矛盾、驾驶认知负担。只报告有明确视觉证据的问题；不要为复杂背景上的文字编造精确对比度；不要自动修改；每项给出0-1置信度；最多12项。只返回纯JSON：{"summary":"摘要","findings":[{"title":"标题","description":"问题与影响","severity":"high|medium|low","confidence":0.0,"evidence":"直接证据","location":"区域","recommendation":"建议"}]}`
     } else {
       // PNG转SVG模式：让AI直接输出SVG，按独立元素切图，每个元素一个SVG
       systemPrompt = `你是专业的 UI 切图专家。请仔细观察用户上传的 HMI 车载界面 PNG 截图，将画面中每一个独立的 UI 元素识别出来，并为每个元素单独绘制一个 SVG。
@@ -285,13 +292,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             { type: 'image_url', image_url: { url: imageUrl } },
             { type: 'text', text: mode === 'text_extract'
               ? '请提取这张 HMI 界面中的所有文本'
-              : '请根据这张HMI界面截图，按照要求的格式生成各个功能区域的SVG代码。'
+              : mode === 'design_audit'
+                ? `请做视觉补充复核。规则检测摘要：${JSON.stringify(data.context || {}).slice(0, 12000)}`
+                : '请根据这张HMI界面截图，按照要求的格式生成各个功能区域的SVG代码。'
             },
           ],
         },
       ],
-      max_tokens: 12288,
-      temperature: 0.2,
+      max_tokens: mode === 'png2svg' ? 12288 : 4096,
+      temperature: mode === 'design_audit' ? 0.15 : 0.2,
     }
 
     const resp = await fetch(`${ARK_BASE}/chat/completions`, {
@@ -313,7 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const rawContent: string = respData.choices?.[0]?.message?.content || ''
 
-    if (mode === 'text_extract') {
+    if (mode === 'text_extract' || mode === 'design_audit') {
       // 文本提取模式：尝试解析JSON
       function parseJSON(text: string): unknown {
         const codeMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -321,10 +330,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         try {
           return JSON.parse(toParse)
         } catch {
+          if (mode === 'design_audit') throw new Error('AI 输出无法解析，未生成复核结果')
           return { regions: [], summary: '文本提取结果解析失败' }
         }
       }
-      res.status(200).json({ ok: true, mode, result: parseJSON(rawContent) })
+      const result = parseJSON(rawContent)
+      if (mode === 'design_audit' && !validateVisualAudit(result)) { res.status(422).json({ ok: false, error: 'AI 输出缺少有效证据或格式不完整' }); return }
+      res.status(200).json({ ok: true, mode, result })
     } else {
       // SVG模式：直接从文本提取SVG块，完全避免JSON解析
       const extracted = extractSVGBlocks(rawContent)

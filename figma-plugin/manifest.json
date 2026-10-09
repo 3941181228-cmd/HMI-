@@ -1,0 +1,19 @@
+{
+  "name": "HMI Codex & Theme Tools",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "menu": [
+    { "name": "Codex 生成 HMI 原生页面", "command": "import-hmi" },
+    { "separator": true },
+    { "name": "配置颜色映射", "command": "configure" },
+    { "separator": true },
+    { "name": "Light → Dark", "command": "light-to-dark" },
+    { "name": "Dark → Light", "command": "dark-to-light" }
+  ],
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}

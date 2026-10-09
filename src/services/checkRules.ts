@@ -42,6 +42,21 @@ export interface EffectsRules {
   largeBlurAreaThreshold?: number     // 大面积模糊警告阈值面积px²（默认50000）
 }
 
+// 设计系统治理规则
+export interface DesignSystemRules {
+  minStyleCoverage?: number           // 可样式化节点的最低 Style 覆盖率（百分比，默认60）
+  minVariableCoverage?: number        // 可样式化节点的最低变量绑定率（百分比，默认30）
+  maxGenericNames?: number            // 允许的通用图层命名数量（默认10）
+  disallowEmbeddedMainComponents?: boolean // 是否提示画面内直接嵌入主组件
+  hiddenLargeNodeArea?: number        // 隐藏大图层面积阈值 px²（默认100000）
+}
+
+// 交互与可达性规则
+export interface InteractionRules {
+  minReactionCount?: number           // 原型交互的最低数量（默认1）
+  warnClippedOverflowWithoutScroll?: boolean // 裁剪内容超出但未配置滚动时告警
+}
+
 // 完整检测规则配置
 export interface CheckRules {
   name: string                        // 规则名称
@@ -52,6 +67,8 @@ export interface CheckRules {
   color?: ColorRules
   spacing?: SpacingRules
   effects?: EffectsRules
+  designSystem?: DesignSystemRules
+  interaction?: InteractionRules
 }
 
 // 默认规则（系统内置）
@@ -90,6 +107,17 @@ export const DEFAULT_RULES: CheckRules = {
     maxBlurRadius: 50,
     warnLargeAreaBlur: true,
     largeBlurAreaThreshold: 50000,
+  },
+  designSystem: {
+    minStyleCoverage: 60,
+    minVariableCoverage: 30,
+    maxGenericNames: 10,
+    disallowEmbeddedMainComponents: true,
+    hiddenLargeNodeArea: 100000,
+  },
+  interaction: {
+    minReactionCount: 1,
+    warnClippedOverflowWithoutScroll: true,
   },
 }
 
@@ -191,6 +219,8 @@ export function importRulesFromJSON(jsonStr: string): CheckRules {
   if (data.color && typeof data.color !== 'object') throw new Error('color 规则格式错误')
   if (data.spacing && typeof data.spacing !== 'object') throw new Error('spacing 规则格式错误')
   if (data.effects && typeof data.effects !== 'object') throw new Error('effects 规则格式错误')
+  if (data.designSystem && typeof data.designSystem !== 'object') throw new Error('designSystem 规则格式错误')
+  if (data.interaction && typeof data.interaction !== 'object') throw new Error('interaction 规则格式错误')
   return data as CheckRules
 }
 
@@ -210,6 +240,8 @@ function deepMergeRules(base: CheckRules, override: Partial<CheckRules>): CheckR
     color: { ...base.color, ...(override.color || {}) },
     spacing: { ...base.spacing, ...(override.spacing || {}) },
     effects: { ...base.effects, ...(override.effects || {}) },
+    designSystem: { ...base.designSystem, ...(override.designSystem || {}) },
+    interaction: { ...base.interaction, ...(override.interaction || {}) },
   }
 }
 
@@ -250,6 +282,17 @@ export function generateRuleTemplate(): string {
       maxBlurRadius: 40,
       warnLargeAreaBlur: true,
       largeBlurAreaThreshold: 40000,
+    },
+    designSystem: {
+      minStyleCoverage: 70,
+      minVariableCoverage: 40,
+      maxGenericNames: 5,
+      disallowEmbeddedMainComponents: true,
+      hiddenLargeNodeArea: 100000,
+    },
+    interaction: {
+      minReactionCount: 1,
+      warnClippedOverflowWithoutScroll: true,
     },
   }, null, 2)
 }

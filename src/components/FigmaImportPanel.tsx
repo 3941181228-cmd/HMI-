@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Link2, CheckCircle2, RefreshCw, AlertCircle, Upload, Download, Trash2, FileJson, ChevronDown, Plus, X } from 'lucide-react';
+import { FileText, Link2, CheckCircle2, RefreshCw, AlertCircle, Upload, Download, Trash2, FileJson, ChevronDown, Plus, X, Crosshair, ShieldCheck, Database } from 'lucide-react';
 import {
   CheckRules,
   DEFAULT_RULES,
@@ -35,6 +35,10 @@ export default function FigmaImportPanel({ onImport, isConnecting, connectionSta
   const currentRules = activeRuleName
     ? savedRules.find(r => r.name === activeRuleName) || DEFAULT_RULES
     : DEFAULT_RULES;
+  let detectedNodeId = '';
+  try {
+    detectedNodeId = decodeURIComponent(new URL(url).searchParams.get('node-id') || '').replace(/-/g, ':');
+  } catch {}
 
   const validateFigmaUrl = (inputUrl: string): boolean => {
     const figmaRegex = /^https?:\/\/(?:www\.)?figma\.com\/(file|proto|design)\/[a-zA-Z0-9-_]+\/?.*$/;
@@ -195,6 +199,12 @@ export default function FigmaImportPanel({ onImport, isConnecting, connectionSta
           )}
         </div>
         {error && <p className="text-xs text-[hsl(var(--destructive))]">{error}</p>}
+        {url && !error && validateFigmaUrl(url) && (
+          <div className="flex items-center gap-2 rounded-lg border border-cyan-500/15 bg-cyan-500/5 px-3 py-2 text-[11px] text-muted-foreground">
+            {detectedNodeId ? <Crosshair className="w-3.5 h-3.5 text-cyan-500" /> : <Database className="w-3.5 h-3.5 text-cyan-500" />}
+            <span>{detectedNodeId ? `将仅检测链接节点 ${detectedNodeId} 及其子树` : '未指定节点，将检测整份文件'}</span>
+          </div>
+        )}
       </div>
 
       {/* Check Rules Selector */}
@@ -336,7 +346,11 @@ export default function FigmaImportPanel({ onImport, isConnecting, connectionSta
       </motion.button>
 
       {/* Tips */}
-      <div className="text-xs text-muted-foreground space-y-1">
+      <div className="rounded-xl border border-[hsl(var(--border)/0.35)] bg-[hsl(var(--surface-secondary)/0.25)] p-3 text-xs text-muted-foreground space-y-2">
+        <div className="flex items-center gap-2 text-foreground">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+          <span className="font-medium">只读检测：规则优先，AI 仅做视觉补充</span>
+        </div>
         <p>支持格式:</p>
         <ul className="list-disc list-inside space-y-0.5">
           <li>Figma 文件链接</li>

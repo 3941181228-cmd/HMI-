@@ -39,6 +39,7 @@ function App() {
   const [themePreset, setThemePreset] = useState<string | null>(null)
   const [wallpaperSub, setWallpaperSub] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [navigationOpen, setNavigationOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState('api')
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false)
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>({
@@ -100,6 +101,7 @@ function App() {
   }, [location.pathname, navigate, searchParams])
 
   const handleNavigate = useCallback((target: string) => {
+    setNavigationOpen(false)
     if (target.includes(':')) {
       const [tab, sub] = target.split(':')
       if (tab === 'check') {
@@ -193,18 +195,24 @@ function App() {
   return (
     <SystemSettingsProvider>
       <MotionWrapper>
-        <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
+        <div className="studio-shell h-screen w-screen flex flex-col overflow-hidden bg-background">
           <TopNavigation
+            navigationOpen={navigationOpen}
+            onToggleNavigation={() => setNavigationOpen(value => !value)}
+            onOpenSettings={() => { setSettingsTab('theme'); setSettingsOpen(true) }}
             autoSave={workspaceSettings.autoSave}
             onOpenWorkspaceSettings={() => setWorkspaceSettingsOpen(true)}
           />
-          <div className="flex-1 flex overflow-hidden">
+          <div className="studio-body flex-1 flex overflow-hidden">
+            <div id="studio-navigation" className="studio-sidebar-wrap" data-open={navigationOpen}>
             <Sidebar
+              activeTab={activeTab}
               onNavigate={handleNavigate}
               activeSection={activeSection}
               historyRecords={records}
               onClearHistory={clearHistory}
             />
+            </div>
             <Workspace
               activeTab={activeTab}
               activeSection={activeSection}

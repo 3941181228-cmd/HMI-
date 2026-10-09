@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, ArrowRight, Sparkles, LayoutGrid, Type, Palette, Boxes, Upload, CheckCircle2, X, RefreshCw } from 'lucide-react';
+import { FileText, ArrowRight, Sparkles, LayoutGrid, Type, Palette, Boxes, X, RefreshCw, Database, ShieldCheck, Eye } from 'lucide-react';
 import FigmaImportPanel from './FigmaImportPanel';
 import AIAnalysisAnimation from './AIAnalysisAnimation';
 import AnalysisReport from './AnalysisReport';
@@ -10,13 +10,27 @@ import CheckLayoutPage from './CheckLayoutPage';
 import CheckTypographyPage from './CheckTypographyPage';
 import CheckColorPage from './CheckColorPage';
 import CheckSpacingPage from './CheckSpacingPage';
-import { analyzeFigmaDocument, AnalysisResult, CheckIssue, getIssuesByCategory } from '../services/figmaAnalyzer';
-import { saveFigmaState, loadFigmaState, clearFigmaState } from '../services/figmaStorage';
+import { analyzeFigmaDocument, AnalysisResult, CheckIssue, getIssuesByCategory, normalizeNodeId } from '../services/figmaAnalyzer';
+import { saveFigmaState, loadFigmaState, clearFigmaState, type FrameImage } from '../services/figmaStorage';
 import { getStoredFigmaToken } from '../services/apiStorage';
-import { getProxiedFigmaImageUrl } from '../services/figmaImageProxy';
 import { CheckRules, DEFAULT_RULES, getActiveRules } from '../services/checkRules';
+import { sha256 } from '../services/figmaVisualAudit';
 
 const FIGMA_API_BASE_URL = '/api/figma';
+
+function normalizeFigmaNodeId(nodeId?: string | null): string {
+  return normalizeNodeId(nodeId || undefined) || '';
+}
+
+function findRawFigmaNode(node: any, nodeId: string): any | null {
+  if (!node || !nodeId) return null;
+  if (node.id === nodeId) return node;
+  for (const child of node.children || []) {
+    const found = findRawFigmaNode(child, nodeId);
+    if (found) return found;
+  }
+  return null;
+}
 
 /**
  * 带超时的 fetch 封装
@@ -59,7 +73,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
   // 因为 figmaDocument 和 analysisResult 数据量大，不再持久化到 localStorage
   const [importStep, setImportStep] = useState<'import' | 'analyzing' | 'result'>('import');
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connected' | 'error'>(
-    (savedState.connectionStatus as 'idle' | 'connected' | 'error') || 'idle'
+    'idle'
   );
   const [connectionError, setConnectionError] = useState<string>('');
   const [isConnecting, setIsConnecting] = useState(false);
@@ -71,10 +85,16 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
   // figmaDocument 和 analysisResult 不从 localStorage 恢复（数据量大）
   const [figmaDocument, setFigmaDocument] = useState<any>(null);
   const [figmaFileKey, setFigmaFileKey] = useState<string>(savedState.figmaFileKey || '');
+  const [figmaNodeId, setFigmaNodeId] = useState<string>('');
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [frameImages, setFrameImages] = useState<Array<{ id: string; name: string; url: string }>>(savedState.frameImages || []);
+  const [frameImages, setFrameImages] = useState<FrameImage[]>([]);
   const [exportAssets, setExportAssets] = useState<Array<{ id: string; name: string; url: string; format: string }>>([]);
   const [selectedRules, setSelectedRules] = useState<CheckRules>(getActiveRules());
+
+  const [provenance, setProvenance] = useState<{ fetchedAt?: string; documentHash?: string }>({});
+  const generation = useRef(0);
+  const auditController = useRef<AbortController | null>(null);
+  useEffect(() => () => { generation.current++; auditController.current?.abort(); }, []);
 
   // 递归查找所有带有PNG导出设置的节点（切图）
   const findExportableNodes = (node: any): Array<{ id: string; name: string; format: string }> => {
@@ -110,10 +130,19 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
   }, [activeSection, figmaDocument]);
 
   const handleFigmaImport = async (url: string, rules?: CheckRules) => {
+    const requestGeneration = ++generation.current;
+    auditController.current?.abort();
+    setFigmaDocument(null);
+    setAnalysisResult(null);
+    setSelectedIssue(undefined);
+    setImportStep('import');
     setIsConnecting(true);
     setConnectionStatus('idle');
     setConnectionError('');
     setFigmaUrl(url);
+    setFrameImages([]);
+    setExportAssets([]);
+    setProvenance({});
     // 保存用户选择的检测规则
     if (rules) {
       setSelectedRules(rules);
@@ -122,9 +151,20 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
     // 浏览器本地 Token 可选；服务端默认 Token 会自动回退
     const figmaToken = getStoredFigmaToken();
 
-    const figmaUrlRegex = /https?:\/\/(?:www\.)?figma\.com\/(file|proto|design)\/([a-zA-Z0-9-_]+)\/?.*$/;
+    const figmaUrlRegex = /^https:\/\/(?:www\.)?figma\.com\/(file|proto|design)\/([a-zA-Z0-9-_]+)(?:\/|\?|$)/;
     const match = url.match(figmaUrlRegex);
     const fileKey = match ? match[2] : '';
+    let targetNodeId = '';
+    let requestedVersion = '';
+    try {
+      targetNodeId = normalizeFigmaNodeId(new URL(url).searchParams.get('node-id'));
+      requestedVersion = new URL(url).searchParams.get('version-id') || new URL(url).searchParams.get('version') || '';
+    } catch {
+      setConnectionStatus('error');
+      setConnectionError('Figma 链接或节点 ID 无效，检测未开始。');
+      setIsConnecting(false);
+      return;
+    }
 
     if (!fileKey) {
       setConnectionStatus('error');
@@ -141,9 +181,12 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
       };
 
       // 调用真实Figma API获取文件数据（带 60 秒超时，防止大文件卡死）
+      const query = new URLSearchParams();
+      if (targetNodeId) query.set('ids', targetNodeId);
+      if (requestedVersion) query.set('version', requestedVersion);
       const response = await fetchWithTimeout(
-        `${FIGMA_API_BASE_URL}/files/${fileKey}`,
-        { headers },
+        `${FIGMA_API_BASE_URL}/files/${fileKey}?${query}`,
+        { headers, cache: 'no-store' },
         60000,
       );
 
@@ -172,7 +215,13 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
         throw new Error(errMsg);
       }
 
-      const data = await response.json();
+      const rawDocument = await response.text();
+      const data = JSON.parse(rawDocument);
+      if (typeof data.version !== 'string' || !data.version.trim()) throw new Error('Figma 未返回可追溯的文件版本，检测已停止');
+      if (requestedVersion && data.version !== requestedVersion) throw new Error('返回的文件版本与链接指定版本不一致，检测已停止');
+      const documentHash = crypto.subtle ? await sha256(new TextEncoder().encode(rawDocument).buffer) : undefined;
+      if (generation.current !== requestGeneration) return;
+      setProvenance({ fetchedAt: new Date().toISOString(), documentHash });
 
       // Figma API成功返回后，data包含{name, document, ...}
       // document是DOCUMENT节点，其children是PAGES
@@ -180,24 +229,35 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
         throw new Error('Figma API 返回数据格式异常，未找到 document 节点');
       }
 
+      const targetNode = targetNodeId ? findRawFigmaNode(data.document, targetNodeId) : null;
+      if (targetNodeId && !targetNode) {
+        throw new Error(`Figma 已返回文件，但未找到链接节点 ${targetNodeId}。请确认节点仍存在并重新复制该节点链接。`);
+      }
       setFigmaDocument(data);
       setFigmaFileKey(fileKey);
+      setFigmaNodeId(targetNodeId);
       setCurrentFile(data.name || '未命名文件');
-      setCurrentPage(data.document.children?.length === 1
-        ? (data.document.children[0]?.name || '所有页面')
-        : `${data.document.children?.length || 0} 个页面`
+      setCurrentPage(targetNode
+        ? `节点 · ${targetNode.name || targetNodeId}`
+        : data.document.children?.length === 1
+          ? (data.document.children[0]?.name || '所有页面')
+          : `${data.document.children?.length || 0} 个页面`
       );
 
       // 获取画板缩略图（带 30 秒超时，失败不阻塞主流程）
-      let fetchedImages: Array<{ id: string; name: string; url: string }> = [];
+      let fetchedImages: FrameImage[] = [];
       try {
         // 收集顶层画板的 ID 和名称
-        const topFrames: Array<{ id: string; name: string }> = [];
-        for (const page of data.document.children || []) {
-          if (page.children) {
-            for (const node of page.children) {
-              if (node.type === 'FRAME' || node.type === 'COMPONENT') {
-                topFrames.push({ id: node.id, name: node.name || '未命名画板' });
+        const topFrames: Array<{ id: string; name: string; bounds: FrameImage['bounds'] }> = targetNode
+          ? [{ id: targetNode.id, name: targetNode.name || '所选节点', bounds: targetNode.absoluteBoundingBox }]
+          : [];
+        if (!targetNode) {
+          for (const page of data.document.children || []) {
+            if (page.children) {
+              for (const node of page.children) {
+                if (node.visible !== false && ['FRAME', 'COMPONENT', 'COMPONENT_SET'].includes(node.type)) {
+                  topFrames.push({ id: node.id, name: node.name || '未命名画板', bounds: node.absoluteBoundingBox });
+                }
               }
             }
           }
@@ -205,7 +265,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
         if (topFrames.length > 0) {
           const idsParam = topFrames.slice(0, 20).map(f => f.id).join(',');
           const imgResponse = await fetchWithTimeout(
-            `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=1`,
+            `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=1&use_absolute_bounds=true${data.version ? `&version=${encodeURIComponent(data.version)}` : ''}`,
             { headers },
             30000,
           );
@@ -215,7 +275,8 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
               // 将画板 ID/名称与缩略图 URL 关联，使用代理URL避免S3访问被阻止
               fetchedImages = topFrames
                 .filter(f => imgData.images[f.id] && imgData.images[f.id] !== 'null')
-                .map(f => ({ id: f.id, name: f.name, url: imgData.images[f.id] }));
+                .map(f => ({ id: f.id, name: f.name, url: imgData.images[f.id], bounds: f.bounds, version: data.version, absoluteBounds: true }));
+              if (generation.current !== requestGeneration) return;
               setFrameImages(fetchedImages);
             }
           }
@@ -227,7 +288,8 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
 
       // 切图资源获取改为非阻塞：后台异步获取，不等待完成即进入分析步骤
       // 避免大量切图节点导致串行请求卡死整个导入流程
-      const exportableNodes = findExportableNodes(data.document);
+      if (generation.current !== requestGeneration) return;
+      const exportableNodes = findExportableNodes(targetNode || data.document);
       if (exportableNodes.length > 0) {
         // 后台异步获取切图 URL，不阻塞主流程
         (async () => {
@@ -243,7 +305,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
               batches.map(async (batch) => {
                 const idsParam = batch.map(n => n.id).join(',');
                 const exportImgResponse = await fetchWithTimeout(
-                  `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=2`,
+                  `${FIGMA_API_BASE_URL}/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=2&version=${encodeURIComponent(data.version)}`,
                   { headers },
                   30000,
                 );
@@ -260,7 +322,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                 allAssets.push(...result.value);
               }
             }
-            if (allAssets.length > 0) {
+            if (allAssets.length > 0 && generation.current === requestGeneration) {
               setExportAssets(allAssets);
             }
           } catch (exportErr) {
@@ -273,7 +335,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
       setConnectionStatus('connected');
       setIsConnecting(false);
       saveFigmaState({
-        figmaUrl,
+        figmaUrl: url,
         figmaFileKey: fileKey,
         figmaFileName: data.name || '未命名文件',
         figmaDocument: data,
@@ -281,8 +343,11 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
         connectionStatus: 'connected',
         importStep: 'analyzing',
       });
-      setTimeout(() => setImportStep('analyzing'), 500);
+      setImportStep('analyzing');
     } catch (error) {
+      if (generation.current !== requestGeneration) return;
+      setAnalysisResult(null);
+      setFigmaDocument(null);
       // 处理超时错误
       const isTimeout = error instanceof DOMException && error.name === 'AbortError';
       const errMsg = isTimeout
@@ -298,30 +363,41 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
     }
   };
 
-  const handleAnalysisComplete = () => {
-    if (figmaDocument) {
-      const result = analyzeFigmaDocument(figmaDocument, figmaFileKey, selectedRules);
-      setAnalysisResult(result);
-      saveFigmaState({
-        analysisResult: result,
-        importStep: 'result',
-      });
+  const runAnalysis = async () => {
+    auditController.current?.abort();
+    if (!figmaDocument) {
+      setConnectionError('没有已读取的文件，未生成检测结果');
+      setConnectionStatus('error');
+      setImportStep('import');
+      return;
     }
+    let result: AnalysisResult;
+    try {
+      result = analyzeFigmaDocument(figmaDocument, figmaFileKey, selectedRules, { targetNodeId: figmaNodeId, ...provenance });
+    } catch (error) {
+      setAnalysisResult(null);
+      setConnectionStatus('error');
+      setConnectionError(error instanceof Error ? error.message : '文件分析失败');
+      setImportStep('import');
+      return;
+    }
+    result = { ...result, auditMeta: { ...result.auditMeta, strategy: 'verified-rules-only', aiReview: {
+      status: 'disabled', findingCount: 0,
+      message: '仅使用当前 Figma 快照的节点属性与所选规则计算，不调用 AI 生成检测数据。缺失、不可验证的属性标为未能检测；无问题记录不代表整体合规。',
+    } } };
+    setAnalysisResult(result);
+    setShowPreview(true);
     setImportStep('result');
   };
 
-  // 使用已有的Figma数据重新运行分析（不需要重新导入）
-  const handleReanalyze = () => {
-    if (figmaDocument) {
-      const result = analyzeFigmaDocument(figmaDocument, figmaFileKey, selectedRules);
-      setAnalysisResult(result);
-      saveFigmaState({
-        analysisResult: result,
-      });
-    }
-  };
+  const handleAnalysisComplete = () => { void runAnalysis(); };
+  // Always fetch a fresh, version-bound snapshot; never label a cached rerun as a new file read.
+  const handleReanalyze = () => { void handleFigmaImport(figmaUrl, selectedRules); };
 
   const handleDisconnect = () => {
+    generation.current++;
+    auditController.current?.abort();
+    setSelectedIssue(undefined);
     clearFigmaState();
     setImportStep('import');
     setConnectionStatus('idle');
@@ -331,14 +407,22 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
     setCurrentPage('');
     setFigmaDocument(null);
     setFigmaFileKey('');
+    setFigmaNodeId('');
     setAnalysisResult(null);
     setFrameImages([]);
     setExportAssets([]);
   };
 
-  const handleSelectIssue = (issue: Issue) => {
-    setSelectedIssue(issue);
+  const handleSelectIssue = (issue: Issue, nodeId?: string) => {
+    const node = nodeId ? analysisResult?.dataSnapshot?.nodes.find(n => n.id === nodeId) : undefined;
+    setSelectedIssue(node ? { ...issue, nodeId: node.id, nodeName: node.name, nodePath: node.nodePath,
+      position: node.bounds || undefined,
+      figmaUrl: `https://www.figma.com/design/${figmaFileKey}/?node-id=${encodeURIComponent(node.id)}` } : issue);
     setShowPreview(true);
+  };
+  const selectFromCategory = (issue: Issue, nodeId?: string) => {
+    handleSelectIssue(issue, nodeId);
+    onNavigate?.('check:full');
   };
 
   const renderCheckPage = () => {
@@ -376,13 +460,13 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
 
     switch (activeSection) {
       case 'layout':
-        return <CheckLayoutPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'layout') : []} />;
+        return <CheckLayoutPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'layout') : []} onSelectIssue={selectFromCategory} />;
       case 'typography':
-        return <CheckTypographyPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'typography') : []} />;
+        return <CheckTypographyPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'typography') : []} onSelectIssue={selectFromCategory} />;
       case 'color':
-        return <CheckColorPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'color') : []} />;
+        return <CheckColorPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'color') : []} onSelectIssue={selectFromCategory} />;
       case 'spacing':
-        return <CheckSpacingPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'spacing') : []} />;
+        return <CheckSpacingPage checkIssues={analysisResult ? getIssuesByCategory(analysisResult.issues, 'spacing') : []} onSelectIssue={selectFromCategory} />;
       case 'full':
       default:
         return (
@@ -392,14 +476,19 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
             className="h-full flex flex-col"
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
                   <FileText className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-foreground">AI 设计自检</h2>
-                  <p className="text-sm text-muted-foreground">检测设计稿规范问题，输出优化建议</p>
+                  <p className="text-sm text-muted-foreground">读取真实 Figma 节点，按所选规则计算；不生成 AI 检测数据</p>
+                </div>
+                <div className="hidden xl:flex items-center gap-1.5 ml-3">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] text-cyan-500"><Database className="w-3 h-3" />真实 Figma 数据</span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-500"><ShieldCheck className="w-3 h-3" />规则优先</span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[10px] text-violet-500"><Eye className="w-3 h-3" />仅真实数据 · 只读</span>
                 </div>
               </div>
 
@@ -412,12 +501,12 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                     className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--surface-secondary))] hover:bg-[hsl(var(--surface))] rounded-xl text-sm font-medium transition-colors"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    重新分析
+                    重新读取并检测
                   </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => setImportStep('import')}
+                    onClick={() => { generation.current++; auditController.current?.abort(); setImportStep('import'); }}
                     className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--surface-secondary))] hover:bg-[hsl(var(--surface))] rounded-xl text-sm font-medium transition-colors"
                   >
                     <Sparkles className="w-4 h-4" />
@@ -438,9 +527,9 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 flex gap-6">
+            <div className="flex-1 grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)] gap-6 min-h-0">
               {/* Left Panel - Import / Results */}
-              <div className="w-80 flex-shrink-0 space-y-6">
+              <div className="min-w-0 space-y-6 xl:row-span-2">
                 <AnimatePresence mode="wait">
                   {importStep === 'import' && (
                     <motion.div
@@ -476,6 +565,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                         frameCount={analysisResult.frameCount}
                         textCount={analysisResult.textCount}
                         totalNodes={analysisResult.totalNodes}
+                        auditMeta={analysisResult.auditMeta}
                       />
                     </motion.div>
                   )}
@@ -487,7 +577,7 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="w-96 flex-shrink-0 bg-[hsl(var(--surface))] rounded-xl border border-[hsl(var(--border)/0.4)] p-4"
+                  className="min-w-0 max-h-[620px] overflow-y-auto bg-[hsl(var(--surface))] rounded-xl border border-[hsl(var(--border)/0.4)] p-4"
                 >
                   <IssueList
                     issues={analysisResult?.issues as Issue[] || []}
@@ -502,12 +592,13 @@ export default function CheckPage({ activeSection = 'full', onNavigate }: CheckP
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="flex-1 bg-[hsl(var(--surface))] rounded-xl border border-[hsl(var(--border)/0.4)]"
+                  className="min-w-0 min-h-[500px] xl:col-start-2 xl:row-start-1 bg-[hsl(var(--surface))] rounded-xl border border-[hsl(var(--border)/0.4)]"
                 >
                   <FigmaPreview
                     selectedIssue={selectedIssue}
                     onIssueHighlight={handleSelectIssue}
                     images={frameImages}
+                    snapshot={analysisResult?.dataSnapshot}
                     exportAssets={exportAssets}
                   />
                 </motion.div>

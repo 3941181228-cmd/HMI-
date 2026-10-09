@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px; font: 12px/1.55 Inter, system-ui, sans-serif; color: var(--figma-color-text); background: var(--figma-color-bg); }
+    h1 { margin: 0; font-size: 16px; }
+    p { margin: 6px 0 14px; color: var(--figma-color-text-secondary); }
+    textarea { width: 100%; height: 275px; resize: none; padding: 10px; border: 1px solid var(--figma-color-border); border-radius: 8px; color: var(--figma-color-text); background: var(--figma-color-bg-secondary); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
+    textarea:focus { border-color: var(--figma-color-border-selected); }
+    .error { min-height: 20px; padding-top: 4px; color: var(--figma-color-text-danger); }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; }
+    button { height: 32px; padding: 0 14px; border: 1px solid var(--figma-color-border); border-radius: 7px; color: var(--figma-color-text); background: var(--figma-color-bg); cursor: pointer; }
+    button:hover { background: var(--figma-color-bg-hover); }
+    button.primary { border-color: var(--figma-color-bg-brand); color: var(--figma-color-text-onbrand); background: var(--figma-color-bg-brand); }
+    button.primary:hover { background: var(--figma-color-bg-brand-hover); }
+    .paste { float: right; margin-top: -26px; border: 0; height: 24px; padding: 0 7px; color: var(--figma-color-text-brand); background: transparent; }
+  </style>
+</head>
+<body>
+  <h1 id="title">配置颜色映射</h1>
+  <p id="description">从 HMI Agent Studio 复制映射规则后粘贴到下方。规则只保存在当前 Figma 客户端。</p>
+  <button class="paste" id="paste">从剪贴板粘贴</button>
+  <textarea id="mapping" spellcheck="false" placeholder='[{"name":"Primary","light":"#FFFFFF","dark":"#17181B"}]'></textarea>
+  <div class="error" id="error"></div>
+  <div class="actions">
+    <button id="cancel">取消</button>
+    <button class="primary" id="save">保存映射</button>
+  </div>
+  <script>
+    const textarea = document.getElementById('mapping');
+    const error = document.getElementById('error');
+    const title = document.getElementById('title');
+    const description = document.getElementById('description');
+    const save = document.getElementById('save');
+    let mode = 'mapping';
+    onmessage = event => {
+      const message = event.data.pluginMessage;
+      if (message.type === 'ui-mode' && message.mode === 'hmi-import') {
+        mode = 'hmi-import';
+        title.textContent = '导入 Codex HMI 设计';
+        description.textContent = '粘贴 HMI Agent Studio 生成的数据，插件会新建页面并写入可编辑的 Figma 原生图层与颜色样式。';
+        textarea.placeholder = '{"version":"1.0","frame":{...},"nodes":[...]}';
+        save.textContent = '创建 Figma 原生页面';
+      }
+      if (message.type === 'mapping-loaded' && Array.isArray(message.mapping) && message.mapping.length) {
+        textarea.value = JSON.stringify(message.mapping, null, 2);
+      }
+      if (message.type === 'mapping-error') error.textContent = message.message;
+      if (message.type === 'import-error') error.textContent = message.message;
+    };
+    document.getElementById('paste').onclick = async () => {
+      try { textarea.value = await navigator.clipboard.readText(); error.textContent = ''; }
+      catch (_) { error.textContent = '无法读取剪贴板，请使用 Ctrl/⌘ + V 粘贴。'; textarea.focus(); }
+    };
+    save.onclick = () => {
+      error.textContent = '';
+      parent.postMessage({ pluginMessage: { type: mode === 'hmi-import' ? 'import-hmi-spec' : 'save-mapping', value: textarea.value } }, '*');
+    };
+    document.getElementById('cancel').onclick = () => parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
+  </script>
+</body>
+</html>

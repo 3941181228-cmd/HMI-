@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build:plugin": "node scripts/package-figma-plugin.mjs",
     "build": "tsc -b && vite build && node scripts/build-sites-worker.mjs",
     "preview": "vite preview"
   },

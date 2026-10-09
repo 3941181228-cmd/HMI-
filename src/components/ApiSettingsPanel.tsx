@@ -85,9 +85,9 @@ const settingsTabs = [
 ]
 
 const themes = [
-  { id: 'xiaomi', name: '小米紫', primary: '#6366f1', accent: '#8b5cf6', desc: '科技紫调' },
-  { id: 'tesla', name: '特斯拉白', primary: '#f1f5f9', accent: '#94a3b8', desc: '极简纯白' },
-  { id: 'porsche', name: '保时捷红', primary: '#ef4444', accent: '#f97316', desc: '运动激情' },
+  { id: 'xiaomi', name: '紫罗兰', primary: '#6366f1', accent: '#8b5cf6', desc: '科技紫调' },
+  { id: 'tesla', name: '珍珠白', primary: '#f1f5f9', accent: '#94a3b8', desc: '极简纯白' },
+  { id: 'porsche', name: '朱砂红', primary: '#ef4444', accent: '#f97316', desc: '运动激情' },
   { id: 'deepspace', name: '深空蓝', primary: '#0ea5e9', accent: '#8b5cf6', desc: '深空探索' },
   { id: 'future', name: '未来蓝', primary: '#06b6d4', accent: '#3b82f6', desc: '未来感' },
 ]
@@ -102,9 +102,9 @@ const resolutions = [
 ]
 
 const aiStyles = [
-  { id: 'xiaomi', name: '小米 SU7', desc: '科技简约风格' },
-  { id: 'tesla', name: '特斯拉极简', desc: '极简主义' },
-  { id: 'porsche', name: '保时捷豪华', desc: '豪华质感' },
+  { id: 'xiaomi', name: '科技简约', desc: '科技简约风格' },
+  { id: 'tesla', name: '纯净极简', desc: '极简主义' },
+  { id: 'porsche', name: '精致质感', desc: '精致材质与细节' },
   { id: 'future', name: '未来座舱', desc: '未来座舱' },
 ]
 
