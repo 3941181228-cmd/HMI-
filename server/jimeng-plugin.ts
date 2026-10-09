@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import https from 'node:https'
 import http from 'node:http'
 import OpenAI from 'openai'
+import { listFramesNode } from './figma-list-frames-node.mjs'
 import { toFile } from 'openai'
 
 const ARK_BASE = 'https://ark.cn-beijing.volces.com/api/v3'
@@ -98,6 +99,9 @@ export function jimengServerPlugin(env?: Record<string, string>): Plugin {
   return {
     name: 'jimeng-server',
     configureServer(server: ViteDevServer) {
+      server.middlewares.use('/api/figma/list-frames', (req, res) => {
+        void listFramesNode(req, res, { ...process.env, ...env, FIGMA_API_TOKEN: storedFigmaKey })
+      })
 
       // Get current API key status (with lightweight validation)
       server.middlewares.use('/api/jimeng/status', async (_req, res) => {

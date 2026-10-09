@@ -4,6 +4,11 @@
   functions = "netlify/functions"
 
 [[redirects]]
+  from = "/api/figma/list-frames"
+  to = "/.netlify/functions/figma-list-frames"
+  status = 200
+
+[[redirects]]
   from = "/api/figma/*"
   to = "/.netlify/functions/figma-proxy"
   status = 200
